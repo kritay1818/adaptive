@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>ADActive — שיחה</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body class="history-window">
+    <div class="shell">
+      <div id="chat-drag" aria-hidden="true"><span></span></div>
+      <section id="options-panel" hidden aria-label="אפשרויות שיחה">
+        <section class="workspace">
+          <label class="sr-only" for="projects">פרויקט נוכחי</label>
+          <div class="project-row">
+            <select id="projects" aria-label="פרויקט נוכחי"></select
+            ><button id="new-project" class="icon" aria-label="פרויקט חדש">
+              +
+            </button>
+          </div>
+          <span id="connection-status" class="connection-status" role="status"
+            >אין מודל מחובר</span
+          >
+          <span id="wordpress-status" class="connection-status" role="status"
+            >WordPress לא מחובר</span
+          >
+        </section>
+        <nav class="tabs" aria-label="תצוגה">
+          <button id="chat-tab">שיחה</button>
+          <button id="inspect-tab">הקשר וכללים</button>
+          <button
+            id="chat-model-toggle"
+            type="button"
+            aria-expanded="false"
+            aria-controls="chat-model-menu"
+          >
+            בחירת מודל ▾
+          </button>
+          <button id="hide" type="button">הסתר שיחה</button>
+        </nav>
+      </section>
+      <main id="chat-panel">
+        <div id="messages" aria-live="polite" hidden></div>
+        <section id="activity-panel" class="activity-panel" dir="rtl" hidden aria-label="יומן פעולות WordPress">
+          <div id="activity-blocked-banner" class="activity-blocked-banner" hidden>
+            <p>הכתיבות לפרויקט חסומות בשל פעולה שתוצאתה אינה ידועה. נדרשת בדיקה באתר.</p>
+            <button id="activity-unblock-btn" type="button">בדקתי באתר — שחרור חסימה</button>
+          </div>
+          <div id="activity-list" class="activity-list" role="feed"></div>
+        </section>
+        <div id="notice" role="status"></div>
+        <section
+          id="chat-model-menu"
+          class="model-menu"
+          hidden
+          aria-label="בחירת מודל לשיחה"
+        >
+          <input
+            id="chat-model-search"
+            type="search"
+            placeholder="חיפוש מודל או ספק…"
+            aria-label="חיפוש מודל שמור"
+          />
+          <div id="saved-models" class="saved-models"></div>
+          <p class="privacy">
+            מודלים שאומתו בעבר. הבחירה כללית לכל הפרויקטים. ההקשר והשיחה יישלחו
+            לספק הנבחר רק בשליחה הבאה.
+          </p>
+          <button id="apply-model" type="button" disabled>
+            אישור החלפה · ללא בקשת AI
+          </button>
+          <button id="manage-models" type="button">
+            חיבור ספק / מודל נוסף…
+          </button>
+        </section>
+        <header id="history-heading">
+          <h1 id="history-title">היסטוריה</h1>
+          <div class="history-actions">
+            <button id="activity-log-toggle" type="button">יומן פעולות</button>
+            <button id="history-close" type="button">סגירה</button>
+          </div>
+        </header>
+        <form id="chat-form">
+          <div class="composer-box">
+            <img class="command-mark" src="brand-logo.svg" alt="ADActive" />
+            <button
+              type="button"
+              id="connection"
+              class="icon connection"
+              aria-label="חיבור WordPress"
+              aria-haspopup="dialog"
+              title="חיבור WordPress"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="8" cy="9" r="4.5" />
+                <path d="m11.5 12.5 8 8m-3-3 2.5-2.5m-5 .5 2.5-2.5" />
+              </svg>
+            </button>
+            <button id="model-setup" type="button" title="שלב ראשון — חיבור מודל" aria-haspopup="dialog">חיבור מודל</button>
+            <div id="context-chips" aria-label="הקשר מצורף"></div>
+            <button id="history-toggle" class="icon" type="button" aria-label="היסטוריית הפרויקט" aria-haspopup="dialog" title="היסטוריית הפרויקט">◷<span id="history-badge"></span></button>
+            <textarea
+              id="composer"
+              aria-label="הודעה"
+              rows="1"
+              maxlength="12000"
+              placeholder="איך אפשר לעזור באתר שלך?"
+              autofocus
+            ></textarea>
+            <button id="send" class="send" aria-label="שלח הודעה">↑</button>
+            <button
+              hidden
+              id="options-toggle"
+              type="button"
+              class="icon"
+              aria-label="אפשרויות פרויקט ומודל"
+              aria-expanded="false"
+              aria-controls="options-panel"
+            >
+              ⋯
+            </button>
+          </div>
+        </form>
+      </main>
+      <main id="inspect-panel" hidden>
+        <button id="back-chat" type="button">חזרה לשיחה</button>
+        <div class="section-heading">
+          <h2>זיכרון של פרויקט, לא של חלון.</h2>
+          <p>המידע נשמר מקומית ונשלח עם כל בקשה למודל.</p>
+        </div>
+        <form id="context-form">
+          <label
+            >הקשר מאושר<textarea
+              id="context"
+              rows="3"
+              maxlength="16000"
+              placeholder="מי הלקוח? מה בונים? אילו החלטות כבר התקבלו?"
+            ></textarea></label
+          ><label
+            >כללים קבועים<textarea
+              id="rules"
+              rows="3"
+              maxlength="16000"
+            ></textarea></label
+          ><label
+            >מסמכי ייחוס לא מהימנים<textarea
+              id="documents"
+              rows="3"
+              maxlength="16000"
+              placeholder="טקסט מועתק ממסמכים. נשלח בנפרד כהקשר, לא כהוראות."
+            ></textarea></label
+          ><button id="save-context" class="primary">שמירת הקשר וכללים</button>
+          <p id="save-status" role="status"></p>
+        </form>
+      </main>
+    </div>
+    <dialog
+      id="connect-dialog"
+      aria-labelledby="connect-title"
+      aria-describedby="connect-description"
+    >
+      <div class="settings-heading">
+        <h2 id="connect-title">חיבור האתר והמודל</h2>
+        <button id="cancel-connect" type="button">סגירה</button>
+      </div>
+      <p id="connect-description">
+        שני חיבורים נפרדים. האתר שייך לפרויקט הנוכחי; המודל משמש לשיחה.
+      </p>
+      <section class="connection-section" aria-labelledby="wp-title">
+        <h3 id="wp-title">WordPress · האתר שלך</h3>
+        <p id="wp-project"></p>
+        <form id="wp-form">
+          <label
+            >כתובת האתר (HTTPS)<input
+              id="wp-site"
+              type="url"
+              dir="ltr"
+              placeholder="https://example.com"
+              maxlength="2048"
+              required
+              autocomplete="off"
+          /></label>
+          <label
+            >שם משתמש<input
+              id="wp-username"
+              dir="ltr"
+              maxlength="256"
+              required
+              autocomplete="off"
+              spellcheck="false"
+          /></label>
+          <label
+            >Application Password<input
+              id="wp-password"
+              type="password"
+              dir="ltr"
+              maxlength="512"
+              required
+              autocomplete="off"
+              spellcheck="false"
+          /></label>
+          <p class="privacy">
+            צרו סיסמת יישום במסך משתמשים ← פרופיל ב־WordPress. לא סיסמת הכניסה
+            הרגילה. הסיסמה מוצפנת במחשב ואינה נשלחת למודל.
+          </p>
+          <div class="dialog-actions">
+            <button id="wp-test" class="primary">בדיקת חיבור</button
+            ><button id="wp-disconnect" type="button">ניתוק האתר</button>
+          </div>
+          <p id="wp-result" role="status">
+            בדיקת קריאה בלבד. אין שינוי בתוכן האתר.
+          </p>
+        </form>
+      </section>
+      <section class="connection-section" aria-labelledby="model-title">
+        <h3 id="model-title">מודל השיחה</h3>
+        <p class="privacy">
+          חיבור נפרד לאתר. מפתח API של הספק, לא מנוי לאפליקציית צ׳אט. המפתחות
+          והמודל הפעיל משותפים לכל הפרויקטים.
+        </p>
+        <form id="connect-form">
+          <label
+            >ספק<select id="provider" dir="ltr" aria-label="ספק מודל"></select
+          ></label>
+          <label id="region-label" hidden
+            >אזור<select id="provider-region" dir="ltr"></select
+          ></label>
+          <p id="provider-note" class="privacy"></p>
+          <label
+            >מפתח API<input
+              id="api-key"
+              type="password"
+              dir="ltr"
+              autocomplete="off"
+              spellcheck="false"
+              maxlength="512"
+              placeholder="מפתח חדש, או ריק לשימוש במפתח שמור"
+          /></label>
+          <button id="load-models" type="button" hidden>ניסיון נוסף</button>
+          <p id="models-note" class="privacy">
+            המודלים נטענים אוטומטית עם מפתח API, ללא בקשת יצירה.
+          </p>
+          <details id="model-picker" class="model-picker">
+            <summary id="model-summary">בחירת מודל ▾</summary>
+            <input
+              id="model-search"
+              type="search"
+              placeholder="חיפוש ברשימת הספק…"
+              aria-label="חיפוש מודל"
+            />
+            <select
+              id="model"
+              dir="ltr"
+              size="4"
+              aria-label="מודל מהרשימה"
+            ></select>
+          </details>
+          <p id="connect-notice" class="privacy">
+            לחיצה על ״חיבור מודל״ מאשרת בדיקה קצרה שעשויה להיות בתשלום, ללא הקשר
+            הפרויקט. המפתח יישמר מוצפן רק בהצלחה.
+          </p>
+          <div class="dialog-actions">
+            <button
+              id="confirm-connect"
+              type="button"
+              class="primary"
+              aria-describedby="connect-notice"
+            >
+              חיבור מודל</button
+            ><button id="disconnect" type="button">ניתוק המודל</button>
+          </div>
+          <p id="connect-error" role="alert"></p>
+        </form>
+      </section>
+    </dialog>
+    <dialog id="project-dialog" aria-labelledby="project-title">
+      <form id="project-form">
+        <h2 id="project-title">פרויקט חדש</h2>
+        <label
+          >שם הפרויקט<input id="project-name" maxlength="120" required
+        /></label>
+        <div class="dialog-actions">
+          <button class="primary">יצירה</button
+          ><button type="button" id="cancel-project">ביטול</button>
+        </div>
+      </form>
+    </dialog>
+    <script src="renderer.js"></script>
+  </body>
+</html>

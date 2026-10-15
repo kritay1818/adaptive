@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-3 -1 34 47" role="img" aria-label="ADActive lowercase a companion">
+  <title>ADActive a companion</title>
+  <!-- Exact first a contour and navigation arrow from the official ADActive wordmark. -->
+  <path d="M14.6,13.3c-2.7,0-5.2,0.1-8,0.7c-0.4,0.1-0.6,0.2-0.7,0.8l-0.6,3.9c-0.1,0.6,0,0.8,0.5,0.8h7.9
+		c2.8,0,4,1,3.6,3.3l-0.3,1.7h-5.5c-5.8,0-9,1.4-10,8c-1,7.6,2.3,8.4,8.9,8.4c3,0,6.9-0.2,10.1-1c0.8-0.3,1-0.7,1.2-1.5l2.4-16.8
+		C24.8,16.4,23.3,13.3,14.6,13.3z M15.7,34.6c-1.4,0.4-3.5,0.5-4.5,0.5c-2.8,0-3.6-0.6-3.3-3c0.3-2.1,1.2-2.9,3.5-2.9h5.1L15.7,34.6
+		z" transform="translate(.5 1)" fill="#16BDD8" stroke="#020A20" stroke-width="1.2" stroke-linejoin="round"/>
+  <path d="M14.6,13.3c-2.7,0-5.2,0.1-8,0.7c-0.4,0.1-0.6,0.2-0.7,0.8l-0.6,3.9c-0.1,0.6,0,0.8,0.5,0.8h7.9
+		c2.8,0,4,1,3.6,3.3l-0.3,1.7h-5.5c-5.8,0-9,1.4-10,8c-1,7.6,2.3,8.4,8.9,8.4c3,0,6.9-0.2,10.1-1c0.8-0.3,1-0.7,1.2-1.5l2.4-16.8
+		C24.8,16.4,23.3,13.3,14.6,13.3z M15.7,34.6c-1.4,0.4-3.5,0.5-4.5,0.5c-2.8,0-3.6-0.6-3.3-3c0.3-2.1,1.2-2.9,3.5-2.9h5.1L15.7,34.6
+		z" fill="#FFFFFF" stroke="#020A20" stroke-width=".65" stroke-linejoin="round"/>
+  <path d="M124.2,9.9c0.1,0.8-0.2,1-0.9,0.6l-1.1-0.7c-0.6-0.4-1.5-0.7-2-0.6c-0.5,0.1-1.4,0.5-2.1,0.9l-1.2,0.7
+			c-0.7,0.4-0.9,0.2-0.5-0.5l5.2-8.3c0.4-0.7,0.9-0.6,1,0.2L124.2,9.9z" transform="translate(-98 0)" fill="#16BDD8" stroke="#020A20" stroke-width=".35"/>
+  <g fill="#020A20">
+    <rect x="10.5" y="15.3" width="1.15" height="2.25" rx=".57" transform="rotate(8 11 16)"/>
+    <rect x="16" y="15.3" width="1.15" height="2.25" rx=".57" transform="rotate(8 16.5 16)"/>
+  </g>
+</svg>

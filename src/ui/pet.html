@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>ADActive Pet</title>
+    <link rel="stylesheet" href="pet.css" />
+  </head>
+  <body>
+    <div class="grip" title="גרור כדי להזיז">···</div>
+    <button id="open-chat" aria-label="פתח שיחה" title="לחץ לשיחה · גרור להזזה">
+      <img src="pet.svg" alt="העוזר של ADActive בצורת האות a" /></button
+    ><button id="hide-pet" aria-label="הסתר חיה (אפשר להחזיר דרך מגש המערכת)">
+      ×
+    </button>
+    <div class="size-controls" role="group" aria-label="גודל החיה" dir="ltr">
+      <button id="pet-smaller" aria-label="הקטן חיה" title="הקטן">−</button>
+      <button id="pet-reset" aria-label="איפוס גודל" title="גודל ברירת מחדל">
+        ↺
+      </button>
+      <button id="pet-larger" aria-label="הגדל חיה" title="הגדל">+</button>
+    </div>
+    <div id="pet-error" role="status"></div>
+    <script src="pet.js"></script>
+  </body>
+</html>

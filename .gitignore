@@ -1,0 +1,49 @@
+# Dependencies and generated/stale builds; keep local pet assets in src/ui.
+node_modules/
+/dist/
+
+# Generated screenshots, logs, mock artifacts and isolated runtime data.
+# Actual tests/ and tests/fixtures/ source remains included.
+/artifacts/
+/coverage/
+/test-results/
+/playwright-report/
+*.log
+npm-debug.log*
+.DS_Store
+
+# Local credentials/environment (examples must contain placeholders only).
+.env
+.env.*
+*.env
+*.env.*
+!.env.example
+!*.env.example
+secrets/
+credentials/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Runtime/private state, including accidentally relocated userData.
+userData/
+userdata/
+.adactive-data/
+cache/
+.cache/
+logs/
+conversations/
+private-conversations/
+connection.json
+connection.json.tmp
+wordpress-connections.json
+wordpress-connections.json.tmp
+wordpress-operations.json
+wordpress-operations.json.tmp
+projects.json
+projects.json.tmp
+chat-layout.json
+chat-layout.json.tmp
+pet-layout.json
+pet-layout.json.tmp

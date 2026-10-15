@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>חיבור WordPress · ADActive</title>
+    <link rel="stylesheet" href="wordpress.css" />
+  </head>
+  <body>
+    <main aria-labelledby="wp-title">
+      <header>
+        <h1 id="wp-title">חיבור WordPress</h1>
+        <button id="wp-close" type="button">סגירה</button>
+      </header>
+      <p id="wp-project"></p>
+      <p>חיבור לאתר של הפרויקט בלבד — ללא הגדרות מודל וללא בקשות AI.</p>
+      <form id="wp-form">
+        <label
+          >כתובת האתר (HTTPS)<input
+            id="wp-site"
+            type="url"
+            dir="ltr"
+            maxlength="2048"
+            required
+            autocomplete="off"
+            placeholder="https://example.com"
+        /></label>
+        <label
+          >שם משתמש<input
+            id="wp-username"
+            dir="ltr"
+            maxlength="256"
+            required
+            autocomplete="off"
+            spellcheck="false"
+        /></label>
+        <label
+          >Application Password<input
+            id="wp-password"
+            type="password"
+            dir="ltr"
+            maxlength="512"
+            required
+            autocomplete="off"
+            spellcheck="false"
+        /></label>
+        <div id="wp-help" class="help-box">
+          <ol>
+            <li>מתחברים לניהול האתר (WordPress admin) ועוברים אל <strong>משתמשים (Users) ← פרופיל (Profile)</strong>.</li>
+            <li>גוללים למטה אל <strong>Application Passwords</strong>, נותנים שם לסיסמה (למשל: ADActive) ולוחצים על <strong>Add New Application Password</strong>.</li>
+            <li>מעתיקים את הסיסמה שנוצרה ומדביקים אותה כאן למעלה.</li>
+          </ol>
+          <p class="help-note">זו אינה סיסמת הכניסה הרגילה לאתר, אלא סיסמת יישום ייעודית (Application Password).</p>
+        </div>
+        <p>
+          סיסמת יישום ממשתמשים ← פרופיל ב־WordPress, לא סיסמת הכניסה הרגילה.
+          נשמרת מוצפנת במחשב רק לאחר הצלחה ואינה נשלחת למודל.
+        </p>
+        <p>
+          רק לחיצה על ״בדיקת חיבור״ בודקת את פרטי המשתמש בקריאה בלבד. אין שינוי
+          בתוכן או בהגדרות האתר.
+        </p>
+        <button id="wp-test" type="button">בדיקת חיבור</button>
+        <p id="wp-result" role="status">
+          בדיקת קריאה בלבד. אין שינוי בתוכן האתר.
+        </p>
+      </form>
+    </main>
+    <script src="wordpress-ui.js"></script>
+  </body>
+</html>

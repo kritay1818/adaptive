@@ -1,0 +1,112 @@
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+.grip {
+  height: 25px;
+  text-align: center;
+  color: #16bdd8;
+  font-size: 25px;
+  font-weight: bold;
+  -webkit-app-region: drag;
+  cursor: move;
+  text-shadow: 0 1px 2px #020a20;
+}
+button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+#open-chat {
+  display: block;
+  touch-action: none;
+  cursor: grab;
+  width: calc(100vw - 20px);
+  height: calc(100vh - 58px);
+  margin: auto;
+  filter: drop-shadow(0 4px 3px #020a2038);
+}
+#open-chat img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+  animation: breathe 5s ease-in-out infinite;
+  transition: filter 0.2s;
+}
+#open-chat:hover img {
+  filter: drop-shadow(0 0 3px #16bdd866);
+}
+#open-chat:focus-visible {
+  outline: 2px solid #16bdd8;
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+#hide-pet {
+  position: absolute;
+  top: 23px;
+  left: 1px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #020a20;
+  color: #fff;
+  font-size: 16px;
+  opacity: 0;
+}
+body:hover #hide-pet,
+#hide-pet:focus {
+  opacity: 1;
+}
+.size-controls {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  height: 30px;
+}
+.size-controls button {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: #020a20;
+  color: #02c9fd;
+  font-size: 20px;
+}
+.size-controls button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+button:focus-visible {
+  outline: 2px solid #02c9fd;
+  outline-offset: -2px;
+}
+#pet-error {
+  position: absolute;
+  top: 26px;
+  background: #020a20;
+  color: white;
+  font-size: 11px;
+}
+@keyframes breathe {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #open-chat img {
+    animation: none;
+    transition: none;
+  }
+}

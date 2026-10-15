@@ -1,0 +1,38 @@
+{
+  "name": "adactive-pet",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ADActive desktop companion",
+  "author": "ADActive",
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.cjs",
+    "test:ui": "node tests/chat-response-ui.cjs && node tests/model-window-ui.cjs && node tests/command-bar-ui.cjs && node tests/wordpress-ui.cjs && node tests/electron-ui.cjs && node tests/pet-ui.cjs && node tests/providers-ui.cjs && node tests/model-discovery-ui.cjs && node tests/wp-agent-ui.cjs",
+    "build:win": "electron-builder --win portable --x64",
+    "build:mac": "electron-builder --mac dir",
+    "check": "prettier --check \"src/**/*.{cjs,js,html,css}\" \"tests/*.cjs\" package.json"
+  },
+  "devDependencies": {
+    "electron": "^41.0.0",
+    "electron-builder": "^26.0.12",
+    "playwright": "^1.58.2",
+    "prettier": "3.9.9"
+  },
+  "build": {
+    "appId": "agency.adactive.pet",
+    "productName": "ADActive Pet",
+    "asar": true,
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "portable",
+      "icon": "src/ui/icon.ico"
+    },
+    "directories": {
+      "output": "dist"
+    }
+  }
+}

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>חיבור מודל · ADActive</title>
+    <link rel="stylesheet" href="model.css" />
+  </head>
+  <body>
+    <main aria-labelledby="title">
+      <header>
+        <img src="brand-logo.svg" alt="ADActive" /><button
+          id="close-model"
+          type="button"
+        >
+          סגירה
+        </button>
+      </header>
+      <h1 id="title">חיבור מודל</h1>
+      <p id="active" role="status">החיבור הקיים לא משתנה עד לבדיקה מוצלחת.</p>
+      <form id="model-form">
+        <label for="provider">ספק</label
+        ><select id="provider"></select>
+        <div id="region-row" hidden>
+          <label for="region">אזור</label
+          ><select id="region"></select>
+        </div>
+        <label for="api-key">מפתח API חדש</label
+        ><input
+          id="api-key"
+          type="password"
+          dir="ltr"
+          maxlength="512"
+          autocomplete="off"
+          spellcheck="false"
+          aria-describedby="key-note key-help"
+        />
+        <div id="key-help" class="help-box">
+          <ol id="help-steps-list">
+            <li id="help-step-1"></li>
+            <li id="help-step-2"></li>
+            <li id="help-step-3"></li>
+          </ol>
+          <p class="help-note">מנוי ל-ChatGPT/Claude הוא לא מפתח API — צריך להטעין קרדיט בחשבון ה-API.</p>
+          <button id="open-key-page" type="button">פתיחת עמוד המפתחות</button>
+        </div>
+        <p id="key-note">
+          אם מפתח נחשף בצ׳אט, בטלו אותו וצרו חדש אצל הספק. הזינו אותו כאן בלבד.
+          המפתח נשמר מוצפן רק לאחר חיבור מוצלח.
+        </p>
+        <div id="picker" aria-busy="false">
+          <label for="model-search">חיפוש מודל</label
+          ><input
+            id="model-search"
+            type="search"
+            autocomplete="off"
+            placeholder="שם מודל…"
+          />
+          <label for="model">מודל</label
+          ><select id="model" size="4" aria-describedby="result"></select>
+        </div>
+        <p id="result" role="status" aria-live="polite">
+          רשימת המודלים תיטען אוטומטית לאחר הזנת מפתח. אין יצירת תשובה בזמן
+          הטעינה.
+        </p>
+        <p id="cost">
+          רק לחיצה על ״חיבור מודל״ מאשרת בדיקת AI קצרה, שעשויה לחייב את חשבון
+          ה־API.
+        </p>
+        <button
+          id="connect-model"
+          type="button"
+          disabled
+          aria-describedby="cost"
+        >
+          חיבור מודל
+        </button>
+      </form>
+    </main>
+    <script src="model-ui.js"></script>
+  </body>
+</html>
