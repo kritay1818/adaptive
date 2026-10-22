@@ -24,7 +24,7 @@ HTML/Gutenberg בסיסי ובטוח בלבד. אין scripts/styles/embeds, ה�
 - הוסרו ממשטח העבודה הרגיל בקרי CRM, Drive, דואר, נתיבי Hermes, workspace ופרופילים.
 - **שילוב Hermes/ACP הישן מושבת בפועל**, לא רק מוסתר: `main.cjs` אינו טוען או יוצר `HermesBackend`, אין IPC להפעלתו, וה־preload אינו חושף כלי ACP. `send` ו־`connect` דוחים בחירת Hermes ישנה בהודעה ברורה. אין fallback אוטומטי למודל בתשלום.
 - קובצי Hermes היסטוריים, חיבורים מוצפנים, שיחות ופרויקטים קיימים אינם נמחקים או מועברים. הנתונים הישנים של ACP אינם מוצגים כשיחות API. חזרה ל־ACP תדרוש runtime מוגבל ואכיפה ייעודית ל־WordPress; תיקיית עבודה והסתרת UI אינן sandbox.
-- `src/hermes.cjs`, בדיקות הפרוטוקול ומסמכי `docs/hermes-*` נשארו כהיסטוריה בלבד, לא כמסלול נתמך. `tests/hermes-ui.cjs` הוא תרחיש היסטורי לממשק שהוחלף ואינו חלק מבדיקות UI הפעילות. שום התקנת Hermes או פרופיל אחר במחשב אינו משתנה.
+- קוד Hermes/ACP הישן (`src/hermes*.cjs`, בדיקות הפרוטוקול, המסמכים והסקריפט) הוסר מהמאגר. `main.cjs` ממשיך לדחות בחירת Hermes ישנה מקובץ מצב קיים; נתוני משתמש ישנים אינם נמחקים.
 
 ## אבטחת החיבור
 
@@ -53,7 +53,8 @@ npm run check
 
 - בדיקות Node כוללות הצפנה, redaction, הפרדת פרויקטים, URL/SSRF, auth failures, דחיית redirects, הצמדת DNS ב־HTTPS transport ושימור החיבור הקודם.
 - `npm run test:ui` מפעיל תרחישי חיבור, שיחה וכלים ב־**Electron אמיתי עם userData זמני מבודד**: WordPress onboarding, שיחה נפרדת ושימור נתונים, חיה/גרירה/גודל, וחמישה ספקי מודלים עם גילוי/אישור/בחירה/הצפנה. הצלחת WordPress והמודל משתמשת ב־**MOCK מוזרק ומסומן בלבד**, ולא בגישה לרשת. מופע המשתמש הקיים אינו מופעל מחדש.
-- מצב מסירה נוכחי: 92 בדיקות unit עברו; `check` נכשל על formatting ב־12 קבצים. history regression עבר לאחר תיקון race בבדיקה, אבל `test:ui` המלא נחסם ב־legacy `electron-ui.cjs:120` שמחפש תשובה inline; יתר התרחישים עברו בהרצה נפרדת. פירוט וחסימות ב־[HANDOFF](docs/HANDOFF.md).
+- מצב מסירה נוכחי: 157 בדיקות unit עוברות ו־`npm run check` (formatting) ירוק. בדיקות ה־UI (`npm run test:ui`) דורשות Electron עם תצוגה ולכן מורצות ידנית.
+- בניית Windows: `npm run build:win` מייצר מתקין NSIS (התקנה פר־משתמש, ללא הרשאות מנהל) וגרסת portable תחת `dist/`. ב־GitHub, דחיפת תג `v*` (התואם ל־version ב־package.json) מריצה את הבדיקות, בונה ומצרפת את הקבצים ל־release כטיוטה. חתימת קוד אופציונלית ומתועדת ב־`.github/workflows/release-windows.yml`.
 - `artifacts/` הוא פלט בדיקות מקומי מוחרג מהמאגר, כולל צילומי MOCK; `tests/fixtures/` נשאר מקור ציבורי. יש ליצור artifacts לפני בדיקות UI ב־clone חדש.
 - בדיקות provider משתמשות גם באחסון מדומה; תרחישי Electron מפעילים safeStorage אמיתי עם מחרוזות בדיקה פומביות. אי־זמינות הצפנה היא כשל, לא הצלחה מדומה.
 
@@ -68,3 +69,4 @@ npm run check
 
 `src/main.cjs` — חלונות ו־IPC; `src/preload.cjs` — bridge מצומצם; `src/wordpress.cjs` — REST מאומת מוגבל לקריאה/כתיבה מאושרת; `src/wp-agent.cjs` — לולאת כלים ואישור מאובטח; `src/tool-adapters.cjs` — פרוטוקולי כלים לחמישה ספקים; `src/provider.cjs` — חיבורי מודלים מוצפנים ובחירה; `src/provider-adapters.cjs` — חמישה פרוטוקולים/ספקים; `src/core.cjs` — פרויקטים והקשר; `src/ui/` — UI מקומי; `tests/` — בדיקות; `artifacts/` — ראיות ותמונות. executor מוגבל לעמודים/פוסטים עם אישורים; אינו סוכן durable או admin כללי.
 # adaptive
+# Adactive-wordpress-software
