@@ -28,6 +28,8 @@ jobs:
     name: Build installer
     needs: test
     runs-on: windows-latest
+    env:
+      HAS_CERT: ${{ secrets.WIN_CSC_LINK != '' }}
     steps:
       - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
@@ -54,7 +56,16 @@ jobs:
       #             put win.azureSignOptions (endpoint, codeSigningAccountName, certificateProfileName)
       #             in package.json "build"; then uncomment the three AZURE_* lines below.
       # ---------------------------------------------------------------------------------------------
-      - name: Build Windows installer and portable exe
+      # Unsigned build (default): signing auto-discovery is switched off, so an empty secret can never break the build.
+      - name: Build Windows installer and portable exe (unsigned)
+        if: ${{ env.HAS_CERT != 'true' }}
+        run: npm run build:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      # Signed build: runs only when the WIN_CSC_LINK secret exists.
+      - name: Build Windows installer and portable exe (signed)
+        if: ${{ env.HAS_CERT == 'true' }}
         run: npm run build:win
         env:
           CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
