@@ -7,7 +7,7 @@ const fs = require("node:fs"),
 function storeFor(t) {
   const dir = fs.mkdtempSync(
     path.join(
-      process.env.TMPDIR || path.join(__dirname, "../artifacts"),
+      process.env.TMPDIR || require("node:os").tmpdir(),
       "adactive-core-",
     ),
   );
@@ -34,10 +34,7 @@ test("completed turn is persisted atomically and projects are isolated", (t) => 
 });
 test("project context survives restart and untrusted docs stay out of system role", () => {
   const dir = fs.mkdtempSync(
-    path.join(
-      process.env.TMPDIR || path.join(__dirname, "../artifacts"),
-      "adactive-",
-    ),
+    path.join(process.env.TMPDIR || require("node:os").tmpdir(), "adactive-"),
   );
   try {
     let s = new Store(dir);

@@ -7,7 +7,7 @@ const fs = require("node:fs"),
 function setup(t, available = true) {
   const dir = fs.mkdtempSync(
     path.join(
-      process.env.TMPDIR || path.join(__dirname, "../artifacts"),
+      process.env.TMPDIR || require("node:os").tmpdir(),
       "adactive-provider-",
     ),
   );
