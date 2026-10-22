@@ -10,7 +10,12 @@ const ensureOptions = async (page) => {
 };
 
 (async () => {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR, "wp-electron-"));
+  const dir = fs.mkdtempSync(
+    path.join(
+      process.env.TMPDIR || require("node:os").tmpdir(),
+      "wp-electron-",
+    ),
+  );
   // Legacy selection fixture: must not launch ACP or delete saved settings.
   fs.writeFileSync(
     path.join(dir, "backend.json"),

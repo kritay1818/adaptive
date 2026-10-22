@@ -3,7 +3,9 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 (async () => {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR, "pet-ui-"));
+  const dir = fs.mkdtempSync(
+    path.join(process.env.TMPDIR || require("node:os").tmpdir(), "pet-ui-"),
+  );
   let app;
   const launch = async () => {
     app = await electron.launch({

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'"
     />
     <title>ADActive — שיחה</title>
     <link rel="stylesheet" href="app.css" />
@@ -45,14 +45,36 @@
       </section>
       <main id="chat-panel">
         <div id="messages" aria-live="polite" hidden></div>
-        <section id="activity-panel" class="activity-panel" dir="rtl" hidden aria-label="יומן פעולות WordPress">
-          <div id="activity-blocked-banner" class="activity-blocked-banner" hidden>
-            <p>הכתיבות לפרויקט חסומות בשל פעולה שתוצאתה אינה ידועה. נדרשת בדיקה באתר.</p>
-            <button id="activity-unblock-btn" type="button">בדקתי באתר — שחרור חסימה</button>
+        <section
+          id="activity-panel"
+          class="activity-panel"
+          dir="rtl"
+          hidden
+          aria-label="יומן פעולות WordPress"
+        >
+          <div
+            id="activity-blocked-banner"
+            class="activity-blocked-banner"
+            hidden
+          >
+            <p>
+              הכתיבות לפרויקט חסומות בשל פעולה שתוצאתה אינה ידועה. נדרשת בדיקה
+              באתר.
+            </p>
+            <button id="activity-unblock-btn" type="button">
+              בדקתי באתר — שחרור חסימה
+            </button>
           </div>
           <div id="activity-list" class="activity-list" role="feed"></div>
         </section>
         <div id="notice" role="status"></div>
+        <div
+          id="progress"
+          class="progress-line"
+          role="status"
+          aria-live="polite"
+          hidden
+        ></div>
         <section
           id="chat-model-menu"
           class="model-menu"
@@ -78,10 +100,34 @@
           </button>
         </section>
         <header id="history-heading">
-          <h1 id="history-title">היסטוריה</h1>
+          <div class="chat-head-info">
+            <span
+              id="conn-dot"
+              class="conn-dot bad"
+              role="img"
+              aria-label="מצב חיבור"
+            ></span>
+            <div class="chat-head-text">
+              <h1 id="history-title"></h1>
+              <span id="history-site" dir="ltr"></span>
+            </div>
+          </div>
           <div class="history-actions">
             <button id="activity-log-toggle" type="button">יומן פעולות</button>
-            <button id="history-close" type="button">סגירה</button>
+            <details id="chat-more" class="chat-more">
+              <summary aria-label="עוד אפשרויות" title="עוד אפשרויות">
+                ⋯
+              </summary>
+              <div class="chat-more-menu">
+                <button id="chat-export-md" type="button">
+                  ייצוא 20 ההודעות האחרונות · .md
+                </button>
+                <button id="chat-export-txt" type="button">
+                  ייצוא 20 ההודעות האחרונות · .txt
+                </button>
+                <button id="history-close" type="button">סגירת החלון</button>
+              </div>
+            </details>
           </div>
         </header>
         <form id="chat-form">
@@ -100,9 +146,35 @@
                 <path d="m11.5 12.5 8 8m-3-3 2.5-2.5m-5 .5 2.5-2.5" />
               </svg>
             </button>
-            <button id="model-setup" type="button" title="שלב ראשון — חיבור מודל" aria-haspopup="dialog">חיבור מודל</button>
+            <button
+              id="model-setup"
+              type="button"
+              title="שלב ראשון — חיבור מודל"
+              aria-haspopup="dialog"
+            >
+              חיבור מודל
+            </button>
             <div id="context-chips" aria-label="הקשר מצורף"></div>
-            <button id="history-toggle" class="icon" type="button" aria-label="היסטוריית הפרויקט" aria-haspopup="dialog" title="היסטוריית הפרויקט">◷<span id="history-badge"></span></button>
+            <button
+              id="history-toggle"
+              class="icon"
+              type="button"
+              aria-label="היסטוריית הפרויקט"
+              aria-haspopup="dialog"
+              title="היסטוריית הפרויקט"
+            >
+              ◷<span id="history-badge"></span>
+            </button>
+            <button
+              id="attach-image"
+              class="icon"
+              type="button"
+              aria-label="צירוף תמונת השראה"
+              title="צירוף תמונת השראה (PNG / JPG / WebP, עד 5 MB)"
+            >
+              📎
+            </button>
+            <span id="image-chip" class="image-chip" hidden></span>
             <textarea
               id="composer"
               aria-label="הודעה"

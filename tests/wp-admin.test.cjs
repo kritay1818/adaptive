@@ -11,7 +11,9 @@ const storage = {
   decryptString: (b) => b.toString(),
 };
 test("scoped posts draft approval, sanitized capabilities/media/settings reads; forbidden resources denied", async () => {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR, "wp-admin-"));
+  const dir = fs.mkdtempSync(
+    path.join(process.env.TMPDIR || require("node:os").tmpdir(), "wp-admin-"),
+  );
   let writes = 0;
   const calls = [];
   let payload;

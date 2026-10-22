@@ -5,7 +5,12 @@ const fs = require("node:fs");
 const path = require("node:path");
 (async () => {
   const root = path.join(__dirname, ".."),
-    dir = fs.mkdtempSync(path.join(process.env.TMPDIR, "wp-execution-"));
+    dir = fs.mkdtempSync(
+      path.join(
+        process.env.TMPDIR || require("node:os").tmpdir(),
+        "wp-execution-",
+      ),
+    );
   let app;
   try {
     app = await electron.launch({
@@ -142,7 +147,11 @@ const path = require("node:path");
     async function propose() {
       await page.locator("#composer").fill("MOCK ONLY create a draft");
       await page.locator("#send").click();
-      for(let i=0;i<100;i++) { history=app.windows().find(p=>p.url().endsWith("history.html")); if(history) break; await new Promise(r=>setTimeout(r,50)); }
+      for (let i = 0; i < 100; i++) {
+        history = app.windows().find((p) => p.url().endsWith("history.html"));
+        if (history) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
       await history.locator("#wp-review").waitFor();
       await page.waitForFunction(
         () =>
@@ -156,10 +165,12 @@ const path = require("node:path");
       await history.locator("#wp-review").textContent(),
       /MOCK reviewed draft/,
     );
-    const approvalVisible = await history.locator("#wp-approve").evaluate((e) => {
-      const r = e.getBoundingClientRect();
-      return r.top >= 0 && r.bottom <= innerHeight && r.height > 15;
-    });
+    const approvalVisible = await history
+      .locator("#wp-approve")
+      .evaluate((e) => {
+        const r = e.getBoundingClientRect();
+        return r.top >= 0 && r.bottom <= innerHeight && r.height > 15;
+      });
     assert.equal(
       approvalVisible,
       true,
@@ -203,7 +214,9 @@ const path = require("node:path");
     await history.screenshot({
       path: "artifacts/wp-agent-review-narrow-MOCK.png",
     });
-    const staleToken = await history.locator("#wp-review").getAttribute("data-token");
+    const staleToken = await history
+      .locator("#wp-review")
+      .getAttribute("data-token");
     await page.evaluate(async () => window.adactive.create("changed project"));
     const stale = await history.evaluate(async (staleToken) => {
       const token = staleToken;

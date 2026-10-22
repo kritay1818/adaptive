@@ -11,7 +11,9 @@ const storage = {
   decryptString: (b) => b.toString(),
 }; // public test-only sentinel
 function fixture() {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR, "wp-agent-"));
+  const dir = fs.mkdtempSync(
+    path.join(process.env.TMPDIR || require("node:os").tmpdir(), "wp-agent-"),
+  );
   const calls = [];
   const wp = new WordPress(dir, storage, {
     lookup: async () => [{ address: "93.184.216.34", family: 4 }],

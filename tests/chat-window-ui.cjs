@@ -3,7 +3,12 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 (async () => {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR, "chat-window-"));
+  const dir = fs.mkdtempSync(
+    path.join(
+      process.env.TMPDIR || require("node:os").tmpdir(),
+      "chat-window-",
+    ),
+  );
   let app;
   const launch = async () => {
     app = await electron.launch({
@@ -184,7 +189,9 @@ const path = require("node:path");
     });
     await page.locator("#composer").fill("בדיקת Enter");
     await page.locator("#composer").press("Enter");
-    await page.waitForFunction(() => document.querySelector("#history-badge").textContent === "1");
+    await page.waitForFunction(
+      () => document.querySelector("#history-badge").textContent === "1",
+    );
     assert.equal(await page.locator("#composer").inputValue(), "");
     assert.deepEqual((await native()).bounds, moved);
     await page.locator("#composer").fill("בדיקת שלח");

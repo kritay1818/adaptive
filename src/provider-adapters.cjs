@@ -54,15 +54,46 @@ function headers(a, key) {
         : { Authorization: "Bearer " + key }),
   };
 }
-function generation(a, model, messages, validation) {
-  const max = validation ? 128 : 4096;
+// Native image input per provider. `images` = [{mime, data(base64)}] on a user message (reference only).
+function turnContent(a, m) {
+  const images = m.images?.length ? m.images : null;
+  if (a.kind === "gemini")
+    return [
+      { text: m.content },
+      ...(images || []).map((i) => ({
+        inlineData: { mimeType: i.mime, data: i.data },
+      })),
+    ];
+  if (!images) return m.content;
+  if (a.kind === "anthropic")
+    return [
+      ...images.map((i) => ({
+        type: "image",
+        source: { type: "base64", media_type: i.mime, data: i.data },
+      })),
+      { type: "text", text: m.content },
+    ];
+  return [
+    { type: "text", text: m.content },
+    ...images.map((i) => ({
+      type: "image_url",
+      image_url: { url: `data:${i.mime};base64,${i.data}` },
+    })),
+  ];
+}
+function generation(a, model, messages, validation, limit = 4096) {
+  const max = validation ? 128 : limit;
   const system = messages
     .filter((m) => m.role === "system")
     .map((m) => m.content)
     .join("\n\n");
   const turns = messages
     .filter((m) => m.role !== "system")
-    .map(({ role, content }) => ({ role, content }));
+    .map((m) => ({
+      role: m.role,
+      content: m.content,
+      ...(m.images?.length ? { images: m.images } : {}),
+    }));
   if (a.kind === "anthropic")
     return {
       url: a.base + "/messages",
@@ -70,7 +101,10 @@ function generation(a, model, messages, validation) {
         model,
         max_tokens: max,
         ...(system ? { system } : {}),
-        messages: turns,
+        messages: turns.map((m) => ({
+          role: m.role,
+          content: turnContent(a, m),
+        })),
       },
     };
   if (a.kind === "gemini")
@@ -80,7 +114,7 @@ function generation(a, model, messages, validation) {
         ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
         contents: turns.map((m) => ({
           role: m.role === "assistant" ? "model" : "user",
-          parts: [{ text: m.content }],
+          parts: turnContent(a, m),
         })),
         generationConfig: { maxOutputTokens: max },
       },
@@ -91,7 +125,7 @@ function generation(a, model, messages, validation) {
       model,
       messages: [
         ...(system ? [{ role: "system", content: system }] : []),
-        ...turns,
+        ...turns.map((m) => ({ role: m.role, content: turnContent(a, m) })),
       ],
       ...(a.kind === "openai"
         ? { store: false, max_completion_tokens: max }
@@ -185,4 +219,5 @@ module.exports = {
   output,
   listing,
   listed,
+  turnContent,
 };

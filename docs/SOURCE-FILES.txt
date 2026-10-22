@@ -4,16 +4,11 @@ docs/HANDOFF.md
 docs/PROVIDERS.md
 docs/SOURCE-FILES.txt
 docs/WP-EXECUTION.md
-docs/hermes-implementation.md
-docs/hermes-integration-proposal.md
 package-lock.json
 package.json
-scripts/check-hermes-handshake.cjs
 scripts/render-brand.cjs
 src/chat-layout.cjs
 src/core.cjs
-src/hermes-discovery.cjs
-src/hermes.cjs
 src/main.cjs
 src/message-actions.cjs
 src/pet-layout.cjs
@@ -50,10 +45,7 @@ tests/chat-window-ui.cjs
 tests/command-bar-ui.cjs
 tests/core.test.cjs
 tests/electron-ui.cjs
-tests/fixtures/hermes-protocol-mock.cjs
 tests/fixtures/setup-renderer.js
-tests/hermes-ui.cjs
-tests/hermes.test.cjs
 tests/message-actions.test.cjs
 tests/model-cancel.test.cjs
 tests/model-discovery-ui.cjs

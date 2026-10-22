@@ -29,7 +29,9 @@ const candidate = {
   password: "public-dummy-application-password",
 };
 test("injected WP authenticated read stores encrypted project credentials, redacted and isolated", async () => {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR, "wp-test-"));
+  const dir = fs.mkdtempSync(
+    path.join(process.env.TMPDIR || require("node:os").tmpdir(), "wp-test-"),
+  );
   try {
     let request;
     const wp = new WordPress(dir, storage, {
@@ -63,7 +65,9 @@ test("injected WP authenticated read stores encrypted project credentials, redac
 });
 
 test("query REST endpoint preserves root and subdirectory installation bases without rewrite routes", async () => {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR, "wp-query-"));
+  const dir = fs.mkdtempSync(
+    path.join(process.env.TMPDIR || require("node:os").tmpdir(), "wp-query-"),
+  );
   try {
     let captured;
     const wp = new WordPress(dir, storage, {
@@ -100,7 +104,9 @@ test("query REST endpoint preserves root and subdirectory installation bases wit
 });
 
 test("non-REST HTML gives a friendly error without exposing body or replacing credentials", async () => {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR, "wp-html-"));
+  const dir = fs.mkdtempSync(
+    path.join(process.env.TMPDIR || require("node:os").tmpdir(), "wp-html-"),
+  );
   try {
     const wp = new WordPress(dir, storage, {
       lookup: async () => [{ address: "93.184.216.34", family: 4 }],
@@ -180,7 +186,12 @@ test("SSRF guard denies reserved/private/link-local/mapped addresses", () => {
   assert.equal(publicAddress("93.184.216.34"), true);
 });
 test("fail closed encryption, DNS filtering, auth/redirect/size/parse failures preserve old encrypted data", async () => {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR, "wp-security-"));
+  const dir = fs.mkdtempSync(
+    path.join(
+      process.env.TMPDIR || require("node:os").tmpdir(),
+      "wp-security-",
+    ),
+  );
   try {
     let calls = 0,
       addresses = [{ address: "93.184.216.34", family: 4 }],
@@ -337,7 +348,10 @@ test("production HTTPS HTML content type reaches the friendly non-REST error", a
     return req;
   });
   const dir = fs.mkdtempSync(
-    path.join(process.env.TMPDIR, "wp-html-transport-"),
+    path.join(
+      process.env.TMPDIR || require("node:os").tmpdir(),
+      "wp-html-transport-",
+    ),
   );
   try {
     const wp = new WordPress(dir, storage, {
@@ -358,7 +372,9 @@ test("production DNS requests only IPv4, enabling dual-stack hosts without permi
     options = opts;
     return [{ address: "93.184.216.34", family: 4 }];
   });
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR, "wp-dns-"));
+  const dir = fs.mkdtempSync(
+    path.join(process.env.TMPDIR || require("node:os").tmpdir(), "wp-dns-"),
+  );
   try {
     const wp = new WordPress(dir, storage, {
       request: async () => ({ status: 200, body: '{"id":7}' }),
@@ -401,7 +417,9 @@ test("production HTTPS body limit aborts oversized streams without parsing", asy
   assert.equal(destroyed, true);
 });
 test("DNS timeout releases busy lock, never sends auth, and keeps previous connection", async (t) => {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR, "wp-timeout-"));
+  const dir = fs.mkdtempSync(
+    path.join(process.env.TMPDIR || require("node:os").tmpdir(), "wp-timeout-"),
+  );
   try {
     const wp = new WordPress(dir, storage, {
       lookup: async () => [{ address: "93.184.216.34", family: 4 }],
@@ -430,7 +448,9 @@ test("DNS timeout releases busy lock, never sends auth, and keeps previous conne
   }
 });
 test("atomic write failure preserves previous connection in memory and disk", async (t) => {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR, "wp-disk-"));
+  const dir = fs.mkdtempSync(
+    path.join(process.env.TMPDIR || require("node:os").tmpdir(), "wp-disk-"),
+  );
   try {
     const wp = new WordPress(dir, storage, {
       lookup: async () => [{ address: "93.184.216.34", family: 4 }],

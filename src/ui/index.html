@@ -70,7 +70,10 @@
             חיבור ספק / מודל נוסף…
           </button>
         </section>
-        <header id="history-heading" hidden><h1 id="history-title">היסטוריה</h1><button id="history-close" type="button">סגירה</button></header>
+        <header id="history-heading" hidden>
+          <h1 id="history-title">היסטוריה</h1>
+          <button id="history-close" type="button">סגירה</button>
+        </header>
         <form id="chat-form">
           <div class="composer-box">
             <img class="command-mark" src="brand-logo.svg" alt="ADActive" />
@@ -87,9 +90,25 @@
                 <path d="m11.5 12.5 8 8m-3-3 2.5-2.5m-5 .5 2.5-2.5" />
               </svg>
             </button>
-            <button id="model-setup" type="button" title="שלב ראשון — חיבור מודל" aria-haspopup="dialog">חיבור מודל</button>
+            <button
+              id="model-setup"
+              type="button"
+              title="שלב ראשון — חיבור מודל"
+              aria-haspopup="dialog"
+            >
+              חיבור מודל
+            </button>
             <div id="context-chips" aria-label="הקשר מצורף"></div>
-            <button id="history-toggle" class="icon" type="button" aria-label="היסטוריית הפרויקט" aria-haspopup="dialog" title="היסטוריית הפרויקט">◷<span id="history-badge"></span></button>
+            <button
+              id="history-toggle"
+              class="icon"
+              type="button"
+              aria-label="היסטוריית הפרויקט"
+              aria-haspopup="dialog"
+              title="היסטוריית הפרויקט"
+            >
+              ◷<span id="history-badge"></span>
+            </button>
             <textarea
               id="composer"
               aria-label="הודעה"

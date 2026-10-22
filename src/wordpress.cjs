@@ -56,9 +56,18 @@ function siteURL(value) {
 }
 function request(
   url,
-  { address, family, authorization, signal, method = "GET", body,
-    contentType = "application/json", binary = false, maxBytes = 262144,
-    acceptedStatuses = [200, 201] },
+  {
+    address,
+    family,
+    authorization,
+    signal,
+    method = "GET",
+    body,
+    contentType = "application/json",
+    binary = false,
+    maxBytes = 262144,
+    acceptedStatuses = [200, 201],
+  },
 ) {
   return new Promise((resolve, reject) => {
     const req = https.request(
@@ -69,7 +78,9 @@ function request(
         signal,
         headers: {
           ...(authorization ? { Authorization: authorization } : {}),
-          Accept: binary ? "image/jpeg,image/png,image/webp,image/gif" : "application/json",
+          Accept: binary
+            ? "image/jpeg,image/png,image/webp,image/gif"
+            : "application/json",
           ...(body
             ? {
                 "Content-Type": contentType,
@@ -87,7 +98,10 @@ function request(
         let length = 0;
         const chunks = [];
         // Node HTTPS never follows Location; do not consume redirect/error payloads.
-        if (!acceptedStatuses.includes(res.statusCode) || (res.statusCode >= 300 && res.statusCode < 400)) {
+        if (
+          !acceptedStatuses.includes(res.statusCode) ||
+          (res.statusCode >= 300 && res.statusCode < 400)
+        ) {
           resolve({ status: res.statusCode, body: "" });
           res.destroy();
           return;
@@ -105,7 +119,9 @@ function request(
           resolve({
             status: res.statusCode,
             contentType: res.headers?.["content-type"] || "",
-            body: binary ? Buffer.concat(chunks) : Buffer.concat(chunks).toString("utf8"),
+            body: binary
+              ? Buffer.concat(chunks)
+              : Buffer.concat(chunks).toString("utf8"),
           }),
         );
       },
@@ -115,51 +131,147 @@ function request(
   });
 }
 const IMAGE_LIMIT = 10 * 1024 * 1024;
-const IMAGE_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
+// Page/post REST responses (context=edit carries raw and rendered content): sized for large designed pages.
+const PAGE_RESPONSE_LIMIT = 4 * 1024 * 1024;
+const IMAGE_TYPES = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "image/avif": "avif",
+};
+// File type from the real bytes (magic numbers), never from a file name or header. AVIF = ISO-BMFF "ftyp" box with an avif/avis brand.
+function sniffImage(bytes) {
+  if (!Buffer.isBuffer(bytes) || bytes.length < 12) return null;
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)
+    return "image/jpeg";
+  if (
+    bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+  )
+    return "image/png";
+  if (
+    bytes.toString("ascii", 0, 4) === "RIFF" &&
+    bytes.toString("ascii", 8, 12) === "WEBP"
+  )
+    return "image/webp";
+  if (["GIF87a", "GIF89a"].includes(bytes.toString("ascii", 0, 6)))
+    return "image/gif";
+  if (bytes.toString("ascii", 4, 8) === "ftyp") {
+    const size = Math.min(bytes.readUInt32BE(0), 64, bytes.length);
+    const brands = [bytes.toString("ascii", 8, 12)];
+    for (let i = 16; i + 4 <= size; i += 4)
+      brands.push(bytes.toString("ascii", i, i + 4));
+    if (brands.some((b) => b === "avif" || b === "avis")) return "image/avif";
+  }
+  return null;
+}
+// Wix serves transformed images (often AVIF) under /media/<id>/v1/...; the original path is the plain upload.
+function wixOriginal(url) {
+  if (url.hostname !== "static.wixstatic.com") return null;
+  const m = /^(\/media\/[^/]+)\/v1\/.+$/.exec(url.pathname);
+  return m ? imageURL(`https://static.wixstatic.com${m[1]}`) : null;
+}
 function imageURL(value) {
   text(value, 2048);
   let url;
-  try { url = new URL(value); } catch { throw new Error("כתובת תמונה אינה תקינה"); }
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("כתובת תמונה אינה תקינה");
+  }
   // Reuse the site URL policy, but image query strings are allowed (e.g. CDN sizing).
   siteURL(url.origin);
-  if (!value.startsWith("https://") || url.username || url.password || value.includes("#") || value.slice(8).split(/[/?#]/)[0].includes("@") || /[\\\s\x00-\x1f]/.test(value))
+  if (
+    !value.startsWith("https://") ||
+    url.username ||
+    url.password ||
+    value.includes("#") ||
+    value.slice(8).split(/[/?#]/)[0].includes("@") ||
+    /[\\\s\x00-\x1f]/.test(value)
+  )
     throw new Error("נדרשת כתובת תמונה ציבורית ב־HTTPS ללא פרטי כניסה");
   return url;
 }
 function imageType(bytes, mime) {
-  if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > IMAGE_LIMIT || !Object.hasOwn(IMAGE_TYPES, mime))
-    throw new Error("מותרות תמונות JPEG, PNG, WebP או GIF בלבד, עד 10 MB. SVG אינו מורשה.");
-  const valid = mime === "image/jpeg" ? bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
-    : mime === "image/png" ? bytes.length >= 24 && bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) && bytes.toString("ascii", 12, 16) === "IHDR"
-    : mime === "image/webp" ? bytes.length >= 16 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP"
-    : bytes.length >= 13 && ["GIF87a", "GIF89a"].includes(bytes.toString("ascii", 0, 6));
+  if (
+    !Buffer.isBuffer(bytes) ||
+    !bytes.length ||
+    bytes.length > IMAGE_LIMIT ||
+    !Object.hasOwn(IMAGE_TYPES, mime)
+  )
+    throw new Error(
+      "מותרות תמונות JPEG, PNG, WebP, GIF או AVIF בלבד, עד 10 MB. SVG אינו מורשה.",
+    );
+  const valid =
+    mime === "image/jpeg"
+      ? bytes.length >= 4 &&
+        bytes[0] === 0xff &&
+        bytes[1] === 0xd8 &&
+        bytes[2] === 0xff
+      : mime === "image/png"
+        ? bytes.length >= 24 &&
+          bytes
+            .subarray(0, 8)
+            .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) &&
+          bytes.toString("ascii", 12, 16) === "IHDR"
+        : mime === "image/webp"
+          ? bytes.length >= 16 &&
+            bytes.toString("ascii", 0, 4) === "RIFF" &&
+            bytes.toString("ascii", 8, 12) === "WEBP"
+          : mime === "image/avif"
+            ? sniffImage(bytes) === "image/avif"
+            : bytes.length >= 13 &&
+              ["GIF87a", "GIF89a"].includes(bytes.toString("ascii", 0, 6));
   if (!valid) throw new Error("תוכן הקובץ אינו תואם לסוג התמונה");
 }
 function imageFields({ url, fileName, alt }) {
   imageURL(url);
   text(fileName, 120);
   text(alt, 1000);
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,100}\.(?:jpe?g|png|webp|gif)$/i.test(fileName) || /[<>\x00-\x1f\x7f]/.test(alt))
+  if (
+    !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,100}\.(?:jpe?g|png|webp|gif|avif)$/i.test(
+      fileName,
+    ) ||
+    /[<>\x00-\x1f\x7f]/.test(alt)
+  )
     throw new Error("נדרשים שם קובץ בטוח עם סיומת תמונה וטקסט חלופי ללא HTML");
 }
 const imageDigest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 function mediaSummary(m) {
-  if (!Number.isSafeInteger(m?.id) || m.id <= 0 || m.media_type !== "image" ||
-      !Object.hasOwn(IMAGE_TYPES, m.mime_type) || typeof m.title?.raw !== "string" ||
-      typeof m.alt_text !== "string" || typeof m.source_url !== "string" ||
-      m.title.raw.length > 1000 || m.alt_text.length > 1000)
+  if (
+    !Number.isSafeInteger(m?.id) ||
+    m.id <= 0 ||
+    m.media_type !== "image" ||
+    !Object.hasOwn(IMAGE_TYPES, m.mime_type) ||
+    typeof m.title?.raw !== "string" ||
+    typeof m.alt_text !== "string" ||
+    typeof m.source_url !== "string" ||
+    m.title.raw.length > 1000 ||
+    m.alt_text.length > 1000
+  )
     throw new Error("נתוני תמונה לא תקינים");
   const source = imageURL(m.source_url).href;
   let original = source;
   // WordPress may scale large images; verify the retained original bytes.
   const originalName = m.media_details?.original_image;
   if (originalName !== undefined) {
-    if (typeof originalName !== "string" || !/^[a-zA-Z0-9_.-]+\.(?:jpe?g|png|webp|gif)$/i.test(originalName))
+    if (
+      typeof originalName !== "string" ||
+      !/^[a-zA-Z0-9_.-]+\.(?:jpe?g|png|webp|gif|avif)$/i.test(originalName)
+    )
       throw new Error("שם תמונה מקורית אינו תקין");
     original = imageURL(new URL(originalName, source).href).href;
   }
-  return { id: m.id, title: m.title.raw, alt: m.alt_text, mime: m.mime_type,
-    source, original, status: m.status, modified: typeof m.modified === "string" ? m.modified.slice(0, 40) : "" };
+  return {
+    id: m.id,
+    title: m.title.raw,
+    alt: m.alt_text,
+    mime: m.mime_type,
+    source,
+    original,
+    status: m.status,
+    modified: typeof m.modified === "string" ? m.modified.slice(0, 40) : "",
+  };
 }
 class WordPress {
   constructor(dir, storage, deps = {}) {
@@ -320,7 +432,8 @@ class WordPress {
       )
     )
       throw new Error("שאילתה אינה מורשית");
-    const deadline = AbortSignal.timeout(15000);
+    // Writes of large designed pages can be slow on shared hosts: 90 s for writes, 15 s for reads.
+    const deadline = AbortSignal.timeout(write ? 90000 : 15000);
     const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
     try {
       const credential = JSON.parse(
@@ -356,22 +469,44 @@ class WordPress {
         method: write ? "POST" : "GET",
         ...(write ? { body: JSON.stringify(payload) } : {}),
         signal: combined,
+        maxBytes: PAGE_RESPONSE_LIMIT,
       });
-      if (
-        ![200, 201].includes(result.status) ||
-        typeof result.body !== "string" ||
-        Buffer.byteLength(result.body) > 262144 ||
-        /^(?:text\/html|application\/xhtml)/i.test(result.contentType || "")
-      )
-        throw new Error("response");
+      if (![200, 201].includes(result.status))
+        throw new Error(`status:${result.status}`);
+      if (typeof result.body !== "string") throw new Error("body");
+      if (Buffer.byteLength(result.body) > PAGE_RESPONSE_LIMIT)
+        throw new Error("size");
+      if (/^(?:text\/html|application\/xhtml)/i.test(result.contentType || ""))
+        throw new Error("html");
       return JSON.parse(result.body);
-    } catch {
-      // Never reflect transport errors, server payloads, Authorization or credentials.
-      throw new Error(
+    } catch (e) {
+      // Never reflect server payloads, Authorization or credentials; only a fixed technical reason code is kept.
+      const m = String(e?.message || "");
+      const reason =
+        deadline.aborted && !signal?.aborted
+          ? `חריגה ממגבלת הזמן (${write ? 90 : 15} שניות)`
+          : signal?.aborted
+            ? "הפעולה בוטלה או חרגה ממגבלת הזמן הכוללת"
+            : m === "size" || /size/i.test(m)
+              ? `תשובת האתר גדולה מהמגבלה (${Math.round(PAGE_RESPONSE_LIMIT / 1048576)} MB)`
+              : /^status:(\d+)$/.test(m)
+                ? `האתר החזיר סטטוס HTTP ${m.slice(7)}`
+                : m === "html"
+                  ? "האתר החזיר דף HTML במקום JSON"
+                  : e instanceof SyntaxError
+                    ? "תשובת האתר אינה JSON תקין"
+                    : m === "timeout"
+                      ? "חריגה ממגבלת הזמן בזיהוי כתובת האתר"
+                      : e?.code
+                        ? `שגיאת רשת (${String(e.code).slice(0, 40)})`
+                        : "שגיאת רשת או תשובה לא תקינה";
+      const error = new Error(
         write
           ? "תוצאת הכתיבה אינה ידועה. אין ניסיון חוזר אוטומטי; בדקו באתר לפני פעולה נוספת."
           : "קריאת WordPress נכשלה (רשת, הרשאות, הפניה או תשובה לא תקינה).",
       );
+      error.detail = reason;
+      throw error;
     }
   }
   async pages(id, query = {}, signal, resource = "pages") {
@@ -399,60 +534,154 @@ class WordPress {
     const addresses = await new Promise((resolve, reject) => {
       const abort = () => reject(new Error("timeout"));
       signal.addEventListener("abort", abort, { once: true });
-      Promise.resolve(this.lookup(url.hostname)).then(resolve, reject)
+      Promise.resolve(this.lookup(url.hostname))
+        .then(resolve, reject)
         .finally(() => signal.removeEventListener("abort", abort));
     });
     signal.throwIfAborted();
-    if (!addresses.length || addresses.some((a) => a.family !== 4 || !publicAddress(a.address)))
+    if (
+      !addresses.length ||
+      addresses.some((a) => a.family !== 4 || !publicAddress(a.address))
+    )
       throw new Error("הכתובת אינה יעד IPv4 ציבורי מורשה");
     return addresses[0];
   }
   async downloadImage(value, signal) {
-    const combined = signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000);
+    const combined = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(15000)])
+      : AbortSignal.timeout(15000);
     try {
       const url = imageURL(value);
-      const target = await this.publicTarget(url, combined);
-      // No WordPress Authorization, cookies or redirect following on image hosts.
-      const result = await this.request(url, { ...target, signal: combined, method: "GET", binary: true, maxBytes: IMAGE_LIMIT });
-      combined.throwIfAborted();
-      const mime = (result.contentType || "").split(";")[0].trim().toLowerCase();
-      if (result.status !== 200) throw new Error("response");
-      imageType(result.body, mime);
-      return { bytes: result.body, mime, sha256: imageDigest(result.body) };
+      // Wix: try the original (untransformed) image first, then the given URL. Same network rules for both.
+      const candidates = [wixOriginal(url), url].filter(Boolean);
+      let failure;
+      for (const candidate of candidates) {
+        try {
+          const target = await this.publicTarget(candidate, combined);
+          // No WordPress Authorization, cookies or redirect following on image hosts.
+          const result = await this.request(candidate, {
+            ...target,
+            signal: combined,
+            method: "GET",
+            binary: true,
+            maxBytes: IMAGE_LIMIT,
+          });
+          combined.throwIfAborted();
+          if (result.status !== 200) throw new Error("response");
+          const header = (result.contentType || "")
+            .split(";")[0]
+            .trim()
+            .toLowerCase();
+          if (
+            header &&
+            !header.startsWith("image/") &&
+            !["application/octet-stream", "binary/octet-stream"].includes(
+              header,
+            )
+          )
+            throw new Error("content-type");
+          const mime = sniffImage(result.body);
+          if (!mime) throw new Error("type");
+          imageType(result.body, mime);
+          return { bytes: result.body, mime, sha256: imageDigest(result.body) };
+        } catch (e) {
+          failure = e;
+          if (combined.aborted) break;
+        }
+      }
+      throw failure;
     } catch {
-      throw new Error("הורדת התמונה נכשלה. נדרשת תמונת JPEG/PNG/WebP/GIF ציבורית ב־HTTPS, ללא הפניה, עד 10 MB (ללא SVG).");
+      throw new Error(
+        "הורדת התמונה נכשלה. נדרשת תמונת JPEG/PNG/WebP/GIF/AVIF ציבורית ב־HTTPS, ללא הפניה, עד 10 MB (ללא SVG).",
+      );
     }
   }
   async mediaRequest(id, mediaId, method, signal, upload) {
-    if (!this.secure() || !this.data[id] || !["GET", "POST", "DELETE"].includes(method) ||
-        (method === "POST" ? mediaId !== null : !Number.isSafeInteger(mediaId) || mediaId <= 0))
+    if (
+      !this.secure() ||
+      !this.data[id] ||
+      !["GET", "POST", "DELETE"].includes(method) ||
+      (method === "POST"
+        ? mediaId !== null
+        : !Number.isSafeInteger(mediaId) || mediaId <= 0)
+    )
       throw new Error("פעולת מדיה אינה מורשית");
-    const combined = signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000);
+    const combined = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(15000)])
+      : AbortSignal.timeout(15000);
     try {
-      const credential = JSON.parse(this.storage.decryptString(Buffer.from(this.data[id], "base64")));
+      const credential = JSON.parse(
+        this.storage.decryptString(Buffer.from(this.data[id], "base64")),
+      );
       const base = siteURL(credential.site);
       const target = await this.publicTarget(base, combined);
       const url = new URL("index.php", base);
-      url.searchParams.set("rest_route", "/wp/v2/media" + (mediaId === null ? "" : "/" + mediaId));
+      url.searchParams.set(
+        "rest_route",
+        "/wp/v2/media" + (mediaId === null ? "" : "/" + mediaId),
+      );
       url.searchParams.set("context", "edit");
       if (method === "DELETE") url.searchParams.set("force", "true");
       const result = await this.request(url, {
-        ...target, method, signal: combined,
-        authorization: "Basic " + Buffer.from(credential.username + ":" + credential.password).toString("base64"),
-        ...(upload ? { body: upload.body, contentType: upload.contentType } : {}),
+        ...target,
+        method,
+        signal: combined,
+        authorization:
+          "Basic " +
+          Buffer.from(credential.username + ":" + credential.password).toString(
+            "base64",
+          ),
+        ...(upload
+          ? { body: upload.body, contentType: upload.contentType }
+          : {}),
         acceptedStatuses: method === "GET" ? [200, 404] : [200, 201],
       });
       combined.throwIfAborted();
-      if (typeof result.body !== "string" || Buffer.byteLength(result.body) > 262144 ||
-          /^(?:text\/html|application\/xhtml)/i.test(result.contentType || "")) throw new Error("response");
+      // An explicit client-error refusal of an upload (e.g. unsupported file type) means nothing was written.
+      if (
+        method === "POST" &&
+        result.status >= 400 &&
+        result.status < 500 &&
+        result.status !== 408
+      ) {
+        throw Object.assign(
+          new Error(
+            `האתר דחה את העלאת הקובץ (סטטוס HTTP ${result.status}) ולא נכתב דבר. ייתכן שסוג הקובץ אינו נתמך באתר (AVIF דורש WordPress 6.5 ומעלה ושרת תומך), או שאין הרשאת העלאה.`,
+          ),
+          { notApplied: true, refused: true },
+        );
+      }
+      if (
+        typeof result.body !== "string" ||
+        Buffer.byteLength(result.body) > 262144 ||
+        /^(?:text\/html|application\/xhtml)/i.test(result.contentType || "")
+      )
+        throw new Error("response");
       const data = JSON.parse(result.body);
-      if (method === "GET" && result.status === 404 && data?.code === "rest_post_invalid_id" && data?.data?.status === 404)
+      if (
+        method === "GET" &&
+        result.status === 404 &&
+        data?.code === "rest_post_invalid_id" &&
+        data?.data?.status === 404
+      )
         return null;
-      if ((method === "GET" ? result.status !== 200 : ![200, 201].includes(result.status)) ||
-          !data || typeof data !== "object" || Array.isArray(data)) throw new Error("response");
+      if (
+        (method === "GET"
+          ? result.status !== 200
+          : ![200, 201].includes(result.status)) ||
+        !data ||
+        typeof data !== "object" ||
+        Array.isArray(data)
+      )
+        throw new Error("response");
       return data;
-    } catch {
-      throw new Error(method === "GET" ? "קריאת המדיה נכשלה; אין אימות לתוצאה." : "תוצאת שינוי המדיה אינה ידועה. אין ניסיון חוזר אוטומטי.");
+    } catch (e) {
+      if (e?.refused) throw e;
+      throw new Error(
+        method === "GET"
+          ? "קריאת המדיה נכשלה; אין אימות לתוצאה."
+          : "תוצאת שינוי המדיה אינה ידועה. אין ניסיון חוזר אוטומטי.",
+      );
     }
   }
   async mediaItem(id, mediaId, signal) {
@@ -465,16 +694,33 @@ class WordPress {
   async uploadImage(id, image, fields, signal) {
     imageFields(fields);
     imageType(image.bytes, image.mime);
-    const extension = fields.fileName.split(".").pop().toLowerCase().replace("jpeg", "jpg");
-    if (extension !== IMAGE_TYPES[image.mime]) throw new Error("סיומת הקובץ אינה תואמת לתמונה");
+    const extension = fields.fileName
+      .split(".")
+      .pop()
+      .toLowerCase()
+      .replace("jpeg", "jpg");
+    if (extension !== IMAGE_TYPES[image.mime])
+      throw new Error("סיומת הקובץ אינה תואמת לתמונה");
     const boundary = "ADActive" + randomUUID().replaceAll("-", "");
     const body = Buffer.concat([
-      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="alt_text"\r\n\r\n${fields.alt}\r\n`),
-      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="title"\r\n\r\n${fields.fileName}\r\n`),
-      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fields.fileName}"\r\nContent-Type: ${image.mime}\r\n\r\n`),
-      image.bytes, Buffer.from(`\r\n--${boundary}--\r\n`),
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="alt_text"\r\n\r\n${fields.alt}\r\n`,
+      ),
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="title"\r\n\r\n${fields.fileName}\r\n`,
+      ),
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fields.fileName}"\r\nContent-Type: ${image.mime}\r\n\r\n`,
+      ),
+      image.bytes,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
     ]);
-    return mediaSummary(await this.mediaRequest(id, null, "POST", signal, { body, contentType: `multipart/form-data; boundary=${boundary}` }));
+    return mediaSummary(
+      await this.mediaRequest(id, null, "POST", signal, {
+        body,
+        contentType: `multipart/form-data; boundary=${boundary}`,
+      }),
+    );
   }
   async deleteMedia(id, mediaId, signal) {
     const result = await this.mediaRequest(id, mediaId, "DELETE", signal);
@@ -588,4 +834,14 @@ function pageSummary(p) {
     modified: typeof p.modified === "string" ? p.modified : "",
   };
 }
-module.exports = { WordPress, siteURL, publicAddress, request, imageURL, imageFields, imageType };
+module.exports = {
+  WordPress,
+  siteURL,
+  publicAddress,
+  request,
+  imageURL,
+  imageFields,
+  imageType,
+  sniffImage,
+  IMAGE_TYPES,
+};

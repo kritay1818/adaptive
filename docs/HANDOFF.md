@@ -11,7 +11,6 @@
 - `src/provider.cjs`, `provider-adapters.cjs`, `tool-adapters.cjs`: OpenAI, Anthropic, Gemini, Moonshot בינלאומי ו־Qwen Singapore; גילוי מודלים, אימות קצר בתשלום אפשרי לאחר קליק מפורש, שיחה ופרוטוקולי tool continuation מקוריים. אין fallback שקט; בחירת מודל מרשימה אינה הוכחת תמיכה בכלים.
 - `src/wordpress.cjs`, `wp-agent.cjs`: HTTPS REST מבסיס התקנת האתר באמצעות `index.php?rest_route=...`; pages/posts list/read/prepare-create/prepare-update, capabilities, media/settings לקריאה בלבד. פירוט: [WP-EXECUTION.md](WP-EXECUTION.md), [PROVIDERS.md](PROVIDERS.md).
 - `src/ui/`: renderer מקומי, חלונות pet/model/wordpress/history. **נכסי החיה נדרשים ונכללים**: `pet.svg`, `brand-logo.svg`, `tray.png`, `icon.ico`; גם `pet.html`, `pet.css`, `pet.js`, `src/pet-layout.cjs`. `scripts/render-brand.cjs` מרנדר SVG מקומי לראיות בתיקיית artifacts, אינו תלוי בשירות תמונות.
-- `src/hermes*.cjs`, מסמכי `hermes-*` ובדיקות פרוטוקול: היסטוריה בלבד. Hermes/ACP מושבת ב־main ואינו prerequisite להפעלת הגרסה.
 - `tests/fixtures/`: קוד MOCK ציבורי ו־setup legacy מבודד; חייב להיכלל. `artifacts/` היא פלט בדיקות מקומי מוחרג ולא מקור runtime; צילומים אינם הוכחת live API.
 
 ## התקנה, בדיקה ו־Windows

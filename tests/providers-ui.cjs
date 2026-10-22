@@ -10,7 +10,12 @@ const ensureOptions = async (page) => {
 };
 
 (async () => {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR, "providers-ui-"));
+  const dir = fs.mkdtempSync(
+    path.join(
+      process.env.TMPDIR || require("node:os").tmpdir(),
+      "providers-ui-",
+    ),
+  );
   let app;
   try {
     app = await electron.launch({

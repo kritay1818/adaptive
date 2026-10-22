@@ -5,7 +5,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { Agent, argumentsFor } = require("../src/wp-agent.cjs");
 function fixture() {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR, "wp-gate-"));
+  const dir = fs.mkdtempSync(
+    path.join(process.env.TMPDIR || require("node:os").tmpdir(), "wp-gate-"),
+  );
   let writes = 0;
   let before = {
     id: 5,
@@ -25,7 +27,13 @@ function fixture() {
       return { id: 5 };
     },
   };
-  const agent = new Agent(wp, dir);
+  // Same public test-only storage the newer tests use: the encrypted activity log needs it.
+  const storage = {
+    isEncryptionAvailable: () => true,
+    encryptString: (value) => Buffer.from(value),
+    decryptString: (buffer) => buffer.toString(),
+  };
+  const agent = new Agent(wp, dir, { storage });
   return {
     dir,
     wp,
@@ -75,7 +83,10 @@ test("update readback must preserve unrequested content, not just requested titl
       };
       return { id: 5 };
     };
-    await assert.rejects(f.agent.decide("p", r.review.token, true), /לא אומתה/);
+    const result = await f.agent.decide("p", r.review.token, true);
+    assert.equal(result.outcome, "unknown"); // an unverified write is reported as a result and still blocks the project
+    assert.match(result.text, /לא אומתה/);
+    assert.equal(f.agent.isBlocked("p"), true);
   } finally {
     f.cleanup();
   }
@@ -136,18 +147,46 @@ test("transport unknown outcome never retries and blocks duplicate/restarted wri
     let requests = 0;
     f.wp.pageRequest = async () => {
       requests++;
+      // The write may or may not have landed: the read-back finds a state that is neither the approved one nor the old one.
+      f.before = {
+        id: 5,
+        status: "publish",
+        title: "Someone else",
+        content: "<p>Other</p>",
+        modified: "fixture",
+      };
       throw Error("PRIVATE AUTH HEADER NEVER REFLECT");
     };
-    await assert.rejects(
-      f.agent.decide("p", r.review.token, true),
-      (e) =>
-        !e.message.includes("PRIVATE") && /אין ניסיון חוזר/.test(e.message),
+    const first = await f.agent.decide("p", r.review.token, true);
+    assert.equal(first.outcome, "unknown");
+    assert.ok(
+      !first.text.includes("PRIVATE") && /אין ניסיון חוזר/.test(first.text),
     );
     await assert.rejects(f.agent.decide("p", r.review.token, true));
     await assert.rejects(f.agent.run("p", [], proposal()));
     await assert.rejects(new Agent(f.wp, f.dir).run("p", [], proposal()));
     assert.equal(requests, 1);
     assert.ok(!fs.readFileSync(f.agent.file, "utf8").includes("PRIVATE"));
+  } finally {
+    f.cleanup();
+  }
+});
+test("an ambiguous write whose read-back still shows the old state is 'not applied': one POST, project not blocked", async () => {
+  const f = fixture();
+  try {
+    const r = await f.agent.run("p", [], proposal());
+    let requests = 0;
+    f.wp.pageRequest = async () => {
+      requests++;
+      throw Error("PRIVATE AUTH HEADER NEVER REFLECT");
+    };
+    const result = await f.agent.decide("p", r.review.token, true);
+    assert.equal(result.outcome, "denied");
+    assert.match(result.text, /לא הוחל/);
+    assert.ok(!result.text.includes("PRIVATE"));
+    assert.equal(requests, 1);
+    assert.equal(f.agent.isBlocked("p"), false);
+    assert.ok((await f.agent.run("p", [], proposal())).review);
   } finally {
     f.cleanup();
   }
@@ -176,7 +215,7 @@ for (const [name, args] of [
     "tool argument injection rejected: " + JSON.stringify({ name, args }),
     () => assert.throws(() => argumentsFor(name, args)),
   );
-test("model batch cannot prepare multiple writes, and model calls bounded to 8", async () => {
+test("model batch cannot prepare multiple writes, and model calls bounded by the 80-request safety net", async () => {
   const f = fixture();
   try {
     await assert.rejects(
@@ -208,9 +247,9 @@ test("model batch cannot prepare multiple writes, and model calls bounded to 8",
           };
         },
       }),
-      /מגבלת 8/,
+      /מגבלת הביטחון של 80/,
     );
-    assert.equal(n, 8);
+    assert.equal(n, 80);
     assert.equal(f.writes, 0);
   } finally {
     f.cleanup();

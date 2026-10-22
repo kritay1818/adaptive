@@ -4,7 +4,12 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { Provider } = require("../src/provider.cjs");
 function setup(t, fetcher) {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR, "multi-provider-"));
+  const dir = fs.mkdtempSync(
+    path.join(
+      process.env.TMPDIR || require("node:os").tmpdir(),
+      "multi-provider-",
+    ),
+  );
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   // MOCK encryption/transport, never real credentials.
   const storage = {

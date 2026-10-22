@@ -24,9 +24,13 @@ class Store {
     }
     if (!this.data.projects.length) this.create("הסטודיו שלי");
     let migrated = false;
-    for (const p of this.data.projects) for (const m of p.messages) {
-      if (!m.id) { m.id = randomUUID(); migrated = true; }
-    }
+    for (const p of this.data.projects)
+      for (const m of p.messages) {
+        if (!m.id) {
+          m.id = randomUUID();
+          migrated = true;
+        }
+      }
     if (migrated) this.save();
   }
   save() {
@@ -70,13 +74,28 @@ class Store {
     this.data = data;
     return next;
   }
-  appendTurn(id, user, assistant) {
+  appendTurn(id, user, assistant, meta) {
     const p = this.get(id);
     const at = new Date().toISOString();
     const messages = [
       ...p.messages,
-      { id: randomUUID(), role: "user", content: text(user, 12000), at },
-      { id: randomUUID(), role: "assistant", content: text(assistant, 100000), at },
+      {
+        id: randomUUID(),
+        role: "user",
+        content: text(user, 12000),
+        at,
+        ...(typeof meta?.thumb === "string" &&
+        /^data:image\/(?:jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(meta.thumb) &&
+        meta.thumb.length <= 60000
+          ? { thumb: meta.thumb }
+          : {}),
+      },
+      {
+        id: randomUUID(),
+        role: "assistant",
+        content: text(assistant, 100000),
+        at,
+      },
     ];
     const data = {
       projects: this.data.projects.map((item) =>
@@ -86,7 +105,7 @@ class Store {
     atomic(this.file, data);
     this.data = data;
   }
-  append(id, role, content) {
+  append(id, role, content, meta) {
     if (!["user", "assistant"].includes(role)) throw new Error("Invalid role");
     const p = this.get(id);
     p.messages.push({
@@ -94,6 +113,15 @@ class Store {
       role,
       content: text(content, 100000),
       at: new Date().toISOString(),
+      ...(typeof meta?.view === "string" && meta.view.length <= 100
+        ? { view: meta.view }
+        : {}),
+      ...(typeof meta?.undo === "string" && meta.undo.length <= 100
+        ? {
+            undo: meta.undo,
+            ...(meta.undoPlan === true ? { undoPlan: true } : {}),
+          }
+        : {}),
     });
     this.save();
   }

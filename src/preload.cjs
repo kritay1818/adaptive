@@ -39,7 +39,8 @@ contextBridge.exposeInMainWorld(
     onStateChanged: (callback) => {
       const listener = () => callback();
       ipcRenderer.on("adactive:stateChanged", listener);
-      return () => ipcRenderer.removeListener("adactive:stateChanged", listener);
+      return () =>
+        ipcRenderer.removeListener("adactive:stateChanged", listener);
     },
     openWordPress: () => call("openWordPress"),
     wordPressState: () => call("wordPressState"),
@@ -57,6 +58,15 @@ contextBridge.exposeInMainWorld(
     send: (fields) => call("send", fields),
     decideWordPress: (fields) => call("decideWordPress", fields),
     cancelWordPress: () => call("cancelWordPress"),
+    pickImage: () => call("pickImage"),
+    openHelp: (target) => call("openHelp", { target }),
+    resumeAction: (action) => call("resumeAction", { action }),
+    openSite: (operation) => call("openSite", { operation }),
+    onProgress: (callback) => {
+      const listener = (_e, value) => callback(value);
+      ipcRenderer.on("adactive:progress", listener);
+      return () => ipcRenderer.removeListener("adactive:progress", listener);
+    },
     chatSurface: (surface) => call("chatSurface", surface),
     onShow: (callback) => {
       const listener = () => callback();

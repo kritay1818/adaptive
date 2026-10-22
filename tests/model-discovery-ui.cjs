@@ -4,7 +4,12 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 (async () => {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR, "discovery-ui-"));
+  const dir = fs.mkdtempSync(
+    path.join(
+      process.env.TMPDIR || require("node:os").tmpdir(),
+      "discovery-ui-",
+    ),
+  );
   const app = await electron.launch({
     args: [".", `--adactive-data=${dir}`],
     cwd: path.join(__dirname, ".."),

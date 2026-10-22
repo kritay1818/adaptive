@@ -4,7 +4,12 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { Provider } = require("../src/provider.cjs");
 test("closing candidate during validation prevents late commit and preserves existing connection", async (t) => {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR, "model-cancel-"));
+  const dir = fs.mkdtempSync(
+    path.join(
+      process.env.TMPDIR || require("node:os").tmpdir(),
+      "model-cancel-",
+    ),
+  );
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const storage = {
     isEncryptionAvailable: () => true,

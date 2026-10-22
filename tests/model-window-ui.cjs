@@ -5,7 +5,12 @@ const fs = require("node:fs");
 const path = require("node:path");
 (async () => {
   const root = path.join(__dirname, "..");
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR, "model-window-"));
+  const dir = fs.mkdtempSync(
+    path.join(
+      process.env.TMPDIR || require("node:os").tmpdir(),
+      "model-window-",
+    ),
+  );
   const app = await electron.launch({
     args: [".", `--adactive-data=${dir}`],
     cwd: root,

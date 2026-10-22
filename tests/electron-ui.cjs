@@ -10,7 +10,9 @@ const ensureOptions = async (page) => {
 };
 
 (async () => {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR, "wp-chat-ui-"));
+  const dir = fs.mkdtempSync(
+    path.join(process.env.TMPDIR || require("node:os").tmpdir(), "wp-chat-ui-"),
+  );
   let app;
   const launch = async () => {
     app = await electron.launch({
@@ -172,31 +174,29 @@ const ensureOptions = async (page) => {
       await pet.evaluate(() => window.adactive.state().catch((e) => e.message)),
       /Access denied/,
     );
-    const waitVisible = async (expected) => {
-      for (let attempt = 0; attempt < 40; attempt++) {
-        const visible = await app.evaluate(({ BrowserWindow }) =>
+    const isVisible = (file) =>
+      app.evaluate(
+        ({ BrowserWindow }, file) =>
           BrowserWindow.getAllWindows()
-            .find((w) => w.webContents.getURL().endsWith("index.html"))
-            .isVisible(),
-        );
-        if (visible === expected) return;
+            .find((w) => w.webContents.getURL().endsWith(file))
+            ?.isVisible() ?? false,
+        file,
+      );
+    const waitVisible = async (expected, file = "index.html") => {
+      for (let attempt = 0; attempt < 40; attempt++) {
+        if ((await isVisible(file)) === expected) return;
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
-      throw new Error(`Native sidebar visibility did not become ${expected}`);
+      throw new Error(`Native ${file} visibility did not become ${expected}`);
     };
     await ensureOptions(page);
     await page.locator("#hide").click();
     await waitVisible(false);
+    // Clicking the pet opens the chat window (history.html) with the input focused; the small bar stays hidden.
     await pet.locator("#open-chat").click();
-    await waitVisible(true);
-    assert.equal(
-      await app.evaluate(({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows()
-          .find((w) => w.webContents.getURL().endsWith("index.html"))
-          .isVisible(),
-      ),
-      true,
-    );
+    await waitVisible(true, "history.html");
+    assert.equal(await isVisible("history.html"), true);
+    assert.equal(await isVisible("index.html"), false);
     assert.deepEqual(errors, []);
     await app.close();
     app = null;
@@ -216,7 +216,7 @@ const ensureOptions = async (page) => {
       /לא מחובר/,
     );
     console.log(
-      "PASS Electron chat regressions: separate required model; injected MODEL MOCK only; native safeStorage ciphertext; saved model/context/chat survive restart; project isolation; XSS-as-text; locks; pet show/hide; no page errors. No provider network.",
+      "PASS Electron chat regressions: separate required model; injected MODEL MOCK only; native safeStorage ciphertext; saved model/context/chat survive restart; project isolation; XSS-as-text; locks; pet click opens the chat window; no page errors. No provider network.",
     );
   } finally {
     if (app) await app.close();
