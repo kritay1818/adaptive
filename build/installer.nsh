@@ -1,21 +1,13 @@
 ; Extra NSIS pieces for the ADActive installer (per-user install, no admin rights).
-; Finish page: an optional (unchecked) box "Start ADActive when Windows starts". The uninstaller removes the entry.
-; electron-builder defines PRODUCT_FILENAME on the makensis command line (the exe is "<PRODUCT_FILENAME>.exe").
+; The installer asks once (skipped for silent installs, default "No") whether to start ADActive when Windows starts.
+; The uninstaller removes that entry. electron-builder defines PRODUCT_FILENAME ("<PRODUCT_FILENAME>.exe" is the app).
 
-!macro customHeader
-  !define MUI_FINISHPAGE_SHOWREADME ""
-  !define MUI_FINISHPAGE_SHOWREADME_NOTCHECKED
-  !define MUI_FINISHPAGE_SHOWREADME_TEXT "Start ADActive when Windows starts"
-  !define MUI_FINISHPAGE_SHOWREADME_FUNCTION ADActiveEnableAutoStart
-!macroend
-
-; Only the installer pass uses this function; the separate uninstaller pass would warn about an unreferenced
-; function (and electron-builder treats warnings as errors).
-!ifndef BUILD_UNINSTALLER
-Function ADActiveEnableAutoStart
+!macro customInstall
+  IfSilent adactiveSkipAutoStart
+  MessageBox MB_YESNO|MB_ICONQUESTION "Start ADActive automatically when Windows starts?" /SD IDNO IDNO adactiveSkipAutoStart
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "ADActive" '"$INSTDIR\${PRODUCT_FILENAME}.exe"'
-FunctionEnd
-!endif
+  adactiveSkipAutoStart:
+!macroend
 
 !macro customUnInstall
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "ADActive"
