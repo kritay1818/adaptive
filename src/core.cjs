@@ -89,6 +89,24 @@ class Store {
         meta.thumb.length <= 60000
           ? { thumb: meta.thumb }
           : {}),
+        ...(Array.isArray(meta?.files) && meta.files.length
+          ? {
+              files: meta.files
+                .slice(0, 12)
+                .filter(
+                  (f) =>
+                    f &&
+                    typeof f.name === "string" &&
+                    ["image", "video"].includes(f.kind) &&
+                    ["inspire", "upload"].includes(f.mode),
+                )
+                .map((f) => ({
+                  name: f.name.slice(0, 80),
+                  kind: f.kind,
+                  mode: f.mode,
+                })),
+            }
+          : {}),
       },
       {
         id: randomUUID(),

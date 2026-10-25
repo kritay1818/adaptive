@@ -5,17 +5,17 @@ body {
   margin: 0;
   background: transparent;
   overflow: hidden;
-  font-family: "Segoe UI", Arial, sans-serif;
+  font-family: var(--ad-font-body);
 }
 .grip {
   height: 25px;
   text-align: center;
-  color: #16bdd8;
+  color: var(--ad-accent-2);
   font-size: 25px;
   font-weight: bold;
   -webkit-app-region: drag;
   cursor: move;
-  text-shadow: 0 1px 2px #020a20;
+  text-shadow: 0 1px 2px rgb(4 6 20);
 }
 button {
   border: 0;
@@ -31,7 +31,7 @@ button {
   width: calc(100vw - 20px);
   height: calc(100vh - 58px);
   margin: auto;
-  filter: drop-shadow(0 4px 3px #020a2038);
+  filter: drop-shadow(0 4px 3px rgb(4 6 20 / 0.22));
 }
 #open-chat img {
   width: 100%;
@@ -43,10 +43,12 @@ button {
   transition: filter 0.2s;
 }
 #open-chat:hover img {
-  filter: drop-shadow(0 0 3px #16bdd866);
+  filter: drop-shadow(
+    0 0 3px color-mix(in srgb, var(--ad-accent-deep) 40%, transparent)
+  );
 }
 #open-chat:focus-visible {
-  outline: 2px solid #16bdd8;
+  outline: 2px solid var(--ad-accent-2);
   outline-offset: 2px;
   border-radius: 12px;
 }
@@ -57,8 +59,8 @@ button {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: #020a20;
-  color: #fff;
+  background: var(--ad-accent-ink);
+  color: var(--ad-text);
   font-size: 16px;
   opacity: 0;
 }
@@ -76,8 +78,8 @@ body:hover #hide-pet,
   width: 28px;
   height: 28px;
   border-radius: 9px;
-  background: #020a20;
-  color: #02c9fd;
+  background: var(--ad-accent-ink);
+  color: var(--ad-accent);
   font-size: 20px;
 }
 .size-controls button:disabled {
@@ -85,14 +87,14 @@ body:hover #hide-pet,
   cursor: default;
 }
 button:focus-visible {
-  outline: 2px solid #02c9fd;
+  outline: 2px solid var(--ad-accent);
   outline-offset: -2px;
 }
 #pet-error {
   position: absolute;
   top: 26px;
-  background: #020a20;
-  color: white;
+  background: var(--ad-accent-ink);
+  color: var(--ad-text);
   font-size: 11px;
 }
 @keyframes breathe {

@@ -279,6 +279,41 @@ const PATTERNS = {
       );
     },
   },
+  "video-section": {
+    about:
+      "A video the user uploaded to the media library. Fields: videoUrl* ({{key.url}} of the upload step), videoId ({{key.id}}), posterUrl, caption, heading, text (lead), controls (default true), autoplay (muted loop), tone.",
+    render(d) {
+      const src = imageUrl(d.videoUrl, "videoUrl", true);
+      const id = imageId(d.videoId, "videoId");
+      const poster = imageUrl(d.posterUrl, "posterUrl", false);
+      const autoplay = d.autoplay === true;
+      const muted = autoplay || d.muted === true;
+      const loop = autoplay || d.loop === true;
+      const controls = d.controls !== false;
+      const flags = {
+        ...(controls ? { controls: true } : {}),
+        ...(autoplay ? { autoplay: true } : {}),
+        ...(muted ? { muted: true } : {}),
+        ...(loop ? { loop: true } : {}),
+        playsInline: true,
+      };
+      const attrs = `{${id ? `"id":${id},` : ""}${json({ src, ...(poster ? { poster } : {}), ...flags, className: "ad-video" }).slice(1)}`;
+      const bare = [
+        controls && "controls",
+        autoplay && "autoplay",
+        muted && "muted",
+        loop && "loop",
+        "playsinline",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      const caption = d.caption
+        ? `<figcaption class="wp-element-caption">${esc(text(d.caption, "caption", { max: 300 }))}</figcaption>`
+        : "";
+      const video = `<!-- wp:video ${attrs} --><figure class="wp-block-video ad-video"><video ${bare} src="${escAttr(src)}"${poster ? ` poster="${escAttr(poster)}"` : ""}></video>${caption}</figure><!-- /wp:video -->`;
+      return section(headLead(d) + video, "ad-video-section", tone(d, "light"));
+    },
+  },
   header: {
     template: true,
     about:

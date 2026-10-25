@@ -29,6 +29,8 @@
         "activity-unblock-btn",
         "attach-image",
         "chat-export-md",
+        "chat-open-model",
+        "chat-open-wp",
         "chat-export-txt",
       ].includes(element.id)
     )
@@ -191,7 +193,7 @@
 
         const actionText =
           {
-            upload: "הועלתה תמונה",
+            upload: "הועלה קובץ מדיה",
             "delete-media": "נמחקה תמונה",
             create: "נוצרה טיוטה",
             trash: "הועבר לאשפה",
@@ -339,7 +341,7 @@
         : review.kind === "update"
           ? `יעודכן ${quote(title)} (${review.status === "publish" ? "עמוד מפורסם" : "טיוטה"})`
           : review.kind === "upload"
-            ? `תועלה תמונה לספריית המדיה: ${review.payload?.fileName || ""}`
+            ? `יועלה ${String(review.payload?.mime || "").startsWith("video/") ? "סרטון" : "תמונה"} לספריית המדיה: ${review.payload?.fileName || ""} (${sizeText(review.payload?.bytes || 0)})`
             : review.kind === "delete-media"
               ? "תימחק לצמיתות תמונה שהועלתה דרך האפליקציה"
               : review.kind === "trash"
@@ -572,46 +574,93 @@
   let localTail = [],
     sending = false,
     stopped = false;
-  // Reference image chosen via main's file dialog; the renderer holds only an opaque id and a small thumbnail.
-  let attached = null;
+  // Files chosen via main's file dialog: the renderer only holds opaque ids, names, sizes and small thumbnails.
+  // Each file is "inspire" (sent to the model, images only) or "upload" (to the WordPress media library).
+  let attachedFiles = [];
   const safeThumb = (t) =>
     typeof t === "string" &&
     /^data:image\/(?:jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(t);
+  const sizeText = (n) => `${(n / 1048576).toFixed(n > 10485760 ? 0 : 1)} MB`;
   function paintChip() {
-    const chip = $("image-chip");
-    if (!chip) return;
-    chip.replaceChildren();
-    chip.hidden = !attached;
-    if (!attached) return;
-    if (safeThumb(attached.thumb)) {
-      const img = document.createElement("img");
-      img.src = attached.thumb;
-      img.alt = "תמונת השראה";
-      chip.append(img);
-    }
-    const name = document.createElement("span");
-    name.textContent = attached.name;
-    name.dir = "auto";
-    const x = document.createElement("button");
-    x.type = "button";
-    x.textContent = "×";
-    x.title = "הסרת התמונה";
-    x.setAttribute("aria-label", "הסרת התמונה");
-    x.onclick = () => {
-      if (!busy) {
-        attached = null;
-        paintChip();
+    const box = $("file-chips");
+    if (!box) return;
+    box.replaceChildren();
+    box.hidden = !attachedFiles.length;
+    for (const file of attachedFiles) {
+      const chip = document.createElement("div");
+      chip.className = "file-chip";
+      if (safeThumb(file.thumb)) {
+        const img = document.createElement("img");
+        img.src = file.thumb;
+        img.alt = "";
+        chip.append(img);
+      } else {
+        const icon = document.createElement("span");
+        icon.className = "file-icon";
+        icon.textContent = file.kind === "video" ? "🎬" : "🖼";
+        chip.append(icon);
       }
-    };
-    chip.append(name, x);
+      const info = document.createElement("span");
+      info.className = "file-info";
+      info.dir = "auto";
+      info.textContent = `${file.name} · ${sizeText(file.size)}`;
+      const modes = document.createElement("span");
+      modes.className = "file-modes";
+      for (const [mode, label] of [
+        ["inspire", "כהשראה בלבד"],
+        ["upload", "להעלות לאתר"],
+      ]) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = label;
+        b.className = file.mode === mode ? "on" : "";
+        b.disabled = mode === "inspire" && !file.canInspire;
+        b.title = b.disabled
+          ? "סרטונים ופורמטים שלא ניתן לעבד אפשר רק להעלות לאתר"
+          : "";
+        b.setAttribute("aria-pressed", String(file.mode === mode));
+        b.onclick = () => {
+          if (busy) return;
+          file.mode = mode;
+          paintChip();
+        };
+        modes.append(b);
+      }
+      const x = document.createElement("button");
+      x.type = "button";
+      x.className = "file-remove";
+      x.textContent = "×";
+      x.title = "הסרת הקובץ";
+      x.setAttribute("aria-label", "הסרת הקובץ");
+      x.onclick = async () => {
+        if (busy) return;
+        attachedFiles = attachedFiles.filter((f) => f !== file);
+        paintChip();
+        try {
+          await api.dropFile(file.id);
+        } catch {
+          /* already gone */
+        }
+      };
+      chip.append(info, modes, x);
+      box.append(chip);
+    }
   }
   if ($("attach-image"))
     $("attach-image").onclick = async () => {
       if (busy) return;
       try {
-        const picked = await api.pickImage();
-        if (picked.canceled) return;
-        attached = picked;
+        const picked = await api.pickFiles();
+        if (picked.errors?.length)
+          await notify(picked.errors.join(" · "), true);
+        if (picked.canceled || !picked.files.length) return;
+        attachedFiles = [
+          ...attachedFiles,
+          ...picked.files.map((f) => ({
+            ...f,
+            mode: f.kind === "video" || !f.canInspire ? "upload" : "inspire",
+          })),
+        ].slice(0, 12);
         paintChip();
         $("composer").focus();
       } catch (e) {
@@ -622,12 +671,14 @@
     return localTail.flatMap((entry) => {
       const user = messageNode({
         role: "user",
-        content:
-          entry.image && !safeThumb(entry.image.thumb)
-            ? "🖼 " + entry.text
-            : entry.text,
+        content: entry.text,
         at: entry.at,
-        thumb: entry.image?.thumb,
+        thumb: entry.files?.map((f) => f.thumb).find(safeThumb),
+        files: entry.files?.map((f) => ({
+          name: f.name,
+          kind: f.kind,
+          mode: f.mode,
+        })),
       });
       user.querySelector(".message-menu")?.remove();
       user.dataset.local = "1";
@@ -667,7 +718,7 @@
         if (busy) return;
         localTail = localTail.filter((e) => e !== entry);
         paintLocal();
-        sendInChat(entry.text, entry.image);
+        sendInChat(entry.text, entry.files);
       };
       err.append(
         line,
@@ -696,11 +747,11 @@
     if (on) progressEvent({ text: "חושב…", since: Date.now() });
     else progressEvent({ text: "" });
   }
-  async function sendInChat(message, image = attached) {
+  async function sendInChat(message, files = attachedFiles) {
     busy = true;
     stopped = false;
-    const entry = { text: message, at: new Date().toISOString(), image };
-    attached = null;
+    const entry = { text: message, at: new Date().toISOString(), files };
+    attachedFiles = [];
     paintChip();
     localTail.push(entry);
     $("composer").value = "";
@@ -716,7 +767,9 @@
         id: current.id,
         message,
         contextIds: attachments.map((m) => m.id),
-        ...(image ? { imageId: image.id } : {}),
+        ...(files?.length
+          ? { files: files.map((f) => ({ id: f.id, mode: f.mode })) }
+          : {}),
       });
       localTail = [];
       attachments = [];
@@ -905,7 +958,12 @@
     time.textContent = timeOf(m);
     if (m.role === "assistant" && RESULT.test(m.content)) {
       // Compact result card: icon + one line + view button; the rest is technical and collapsed.
-      const [first, ...rest] = m.content.split("\n");
+      const [first, ...afterFirst] = m.content.split("\n");
+      // Per-step lines ("✅ התמונה הועלתה…") stay visible; everything after them is technical.
+      const stepLines = [];
+      while (afterFirst.length && /^(?:✅|⚠️|❌|•)\s/u.test(afterFirst[0]))
+        stepLines.push(afterFirst.shift());
+      const rest = afterFirst;
       const icon = /^(?:✅|⚠️|❌|⛔)/u.exec(first)[0];
       article.className =
         "msg assistant result " +
@@ -925,6 +983,25 @@
       t.textContent = first.slice(icon.length).trim();
       line.append(i, t);
       article.append(line);
+      if (stepLines.length) {
+        const ul = document.createElement("ul");
+        ul.className = "step-lines";
+        for (const text of stepLines) {
+          // Icon and sentence in separate cells so a LTR file name inside the sentence cannot flip the icon.
+          const [mark, ...words] = text.split(" ");
+          const li = document.createElement("li");
+          const icon = document.createElement("span");
+          icon.className = "result-icon";
+          icon.textContent = mark;
+          const label = document.createElement("span");
+          label.className = "result-text";
+          label.dir = "auto";
+          label.textContent = words.join(" ");
+          li.append(icon, label);
+          ul.append(li);
+        }
+        article.append(ul);
+      }
       if (m.view) article.append(viewButton(m.view));
       if (m.undo && icon !== "❌" && icon !== "⛔")
         article.append(undoButton(m));
@@ -948,13 +1025,29 @@
         const img = document.createElement("img");
         img.className = "msg-thumb";
         img.src = m.thumb;
-        img.alt = "תמונת השראה שצורפה";
+        img.alt = "תמונה שצורפה";
         article.append(img);
       }
-      const body = document.createElement("p");
-      body.dir = "auto";
-      body.textContent = m.content;
-      article.append(body);
+      if (Array.isArray(m.files) && m.files.length) {
+        const list = document.createElement("div");
+        list.className = "msg-files";
+        list.dir = "auto";
+        list.textContent = m.files
+          .map(
+            (f) =>
+              `${f.kind === "video" ? "🎬" : "🖼"} ${f.name} — ${f.mode === "upload" ? "להעלאה לאתר" : "כהשראה"}`,
+          )
+          .join("\n");
+        article.append(list);
+      }
+      if (m.role === "assistant")
+        article.append(window.adMarkdown.render(document, m.content));
+      else {
+        const body = document.createElement("p");
+        body.dir = "auto";
+        body.textContent = m.content;
+        article.append(body);
+      }
       if (techText) {
         const d = document.createElement("details");
         d.className = "review-tech";
@@ -1048,8 +1141,8 @@
     if ($("attach-image")) {
       $("attach-image").disabled = !state.connection.connected;
       $("attach-image").title = state.connection.connected
-        ? "צירוף תמונת השראה (PNG / JPG / WebP, עד 5 MB)"
-        : "חברו מודל כדי לצרף תמונה";
+        ? "צירוף תמונות וסרטונים (תמונה עד 10 MB, סרטון עד 200 MB)"
+        : "חברו מודל כדי לצרף קבצים";
     }
     $("composer").placeholder = state.connection.connected
       ? "איך אפשר לעזור באתר שלך?"
@@ -1109,8 +1202,10 @@
     }
     if (busy || !current) return;
     let message = $("composer").value;
-    if (!message.trim() && history && attached)
-      message = "ראו את תמונת ההשראה המצורפת ועצבו בהתאם";
+    if (!message.trim() && history && attachedFiles.length)
+      message = attachedFiles.some((f) => f.mode === "inspire")
+        ? "ראו את תמונת ההשראה המצורפת ועצבו בהתאם"
+        : "העלו את הקבצים שצירפתי לספריית המדיה של האתר";
     if (!message.trim()) return;
     if (!api) {
       notify("תצוגה מקדימה בלבד — אין בקשת AI.");
@@ -1179,6 +1274,21 @@
   };
   api?.onShow?.(() => $("composer").focus());
   $("composer").addEventListener("input", grow);
+  // Header "⋯" menu: the same connection windows the small bar and the tray open (model key, WordPress site).
+  for (const [id, target] of [
+    ["chat-open-model", "model"],
+    ["chat-open-wp", "wordpress"],
+  ]) {
+    if (!$(id)) continue;
+    $(id).onclick = async () => {
+      $("chat-more").open = false;
+      try {
+        await api.openHelp(target);
+      } catch (e) {
+        await notify(e.message, true);
+      }
+    };
+  }
   // Header "⋯" menu (history window only): export the last 20 messages, close.
   for (const [id, format] of [
     ["chat-export-md", "md"],

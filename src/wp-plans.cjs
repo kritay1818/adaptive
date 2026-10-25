@@ -5,10 +5,12 @@ const { randomUUID } = require("node:crypto");
 const { atomic } = require("./core.cjs");
 const { structureTools, digest, same, pick } = require("./wp-structure.cjs");
 const { PATTERNS, expandStep } = require("./design-kit/index.cjs");
+const { doneText } = require("./results.cjs");
 const MAX_STEPS = 40;
 const ACTIONS = [
   "wp_prepare_upload_image",
   "wp_prepare_upload_scan_graphic",
+  "wp_prepare_upload_user_file",
   "wp_prepare_create_page",
   "wp_prepare_create_post",
   "wp_prepare_update_page",
@@ -20,6 +22,7 @@ const ACTIONS = [
 const LABELS = {
   wp_prepare_upload_image: "העלאת תמונה",
   wp_prepare_upload_scan_graphic: "העלאת גרפיקה מהמקור",
+  wp_prepare_upload_user_file: "העלאת קובץ שצורף בצ׳אט",
   wp_prepare_create_page: "יצירת טיוטת עמוד",
   wp_prepare_create_post: "יצירת טיוטת פוסט",
   wp_prepare_update_page: "עדכון עמוד",
@@ -86,6 +89,14 @@ const kitData = schema({
   logoWidth: { type: "integer" },
   showTitle: { type: "boolean" },
   menuKey: str,
+  videoUrl: str,
+  videoId: referenceId,
+  posterUrl: str,
+  caption: str,
+  autoplay: { type: "boolean" },
+  muted: { type: "boolean" },
+  loop: { type: "boolean" },
+  controls: { type: "boolean" },
 });
 const kitBrand = schema({
   primary: str,
@@ -129,6 +140,7 @@ const planTool = {
               css: str,
               mediaId: referenceId,
               graphicId: str,
+              fileId: str,
               sections: arr(
                 schema(
                   {
@@ -382,6 +394,7 @@ function validatePlan(args, validate) {
               ![
                 "wp_prepare_upload_image",
                 "wp_prepare_upload_scan_graphic",
+                "wp_prepare_upload_user_file",
                 "wp_prepare_create_page",
                 "wp_prepare_create_post",
                 ...(template ? ["wp_prepare_menu"] : []),
@@ -394,6 +407,7 @@ function validatePlan(args, validate) {
                 ![
                   "wp_prepare_upload_image",
                   "wp_prepare_upload_scan_graphic",
+                  "wp_prepare_upload_user_file",
                 ].includes(sourceTool)
               )
                 error("כתובת בתוכן חייבת להגיע מהעלאת תמונה מאומתת");
@@ -412,6 +426,7 @@ function validatePlan(args, validate) {
                 ![
                   "wp_prepare_upload_image",
                   "wp_prepare_upload_scan_graphic",
+                  "wp_prepare_upload_user_file",
                 ].includes(sourceTool)
               )
                 error("מזהה לוגו חייב להיות הפניה מלאה להעלאת תמונה מאומתת");
@@ -550,7 +565,8 @@ class BuildPlans {
     const virtual = new Map(),
       owners = new Map(),
       steps = [];
-    let imageBytes = 0;
+    let imageBytes = 0,
+      videoBytes = 0;
     const readPage = async (_project, pageId, _signal, resource) => {
       const key = `${resource}:${pageId}`;
       if (!virtual.has(key))
@@ -564,19 +580,28 @@ class BuildPlans {
         const resource = definition.tool.endsWith("_post") ? "posts" : "pages";
         const target = resolved.id ? `${resource}:${resolved.id}` : null;
         const beforeFrom = target ? owners.get(target) : undefined;
+        this.agent.checkMedia(id, resolved.content, true);
         let pending;
         if (
           definition.tool === "wp_prepare_upload_image" ||
-          definition.tool === "wp_prepare_upload_scan_graphic"
+          definition.tool === "wp_prepare_upload_scan_graphic" ||
+          definition.tool === "wp_prepare_upload_user_file"
         ) {
           if (definition.tool === "wp_prepare_upload_scan_graphic")
             await agent.prepareGraphic(id, resolved, signal, fingerprint);
+          else if (definition.tool === "wp_prepare_upload_user_file")
+            await agent.prepareUserFile(id, resolved, signal, fingerprint);
           else await agent.prepareImage(id, resolved, signal, fingerprint);
           pending = agent.pending.get(id);
           agent.pending.delete(id);
-          imageBytes += pending.image.bytes.length;
+          // Images/graphics: 50 MB of pending bytes per plan; user videos have their own 400 MB budget.
+          if (pending.image.mime.startsWith("video/"))
+            videoBytes += pending.image.bytes.length;
+          else imageBytes += pending.image.bytes.length;
           if (imageBytes > 50 * 1024 * 1024)
             error("תוכנית מוגבלת ל־50 MB של תמונות ממתינות לאישור");
+          if (videoBytes > 400 * 1024 * 1024)
+            error("תוכנית מוגבלת ל־400 MB של סרטונים ממתינים לאישור");
         } else if (structureTools.some((t) => t.name === definition.tool)) {
           pending = await agent.structure.prepare(
             agent,
@@ -705,6 +730,7 @@ class BuildPlans {
     );
     const args = replaceRefs(step.definition.args, outputs);
     this.validate(step.definition.tool, args);
+    this.agent.checkMedia(p.project, args.content, false); // videos must be files on the connected site
     if (["create", "update"].includes(p.kind)) {
       p.payload = {};
       for (const key of ["title", "content"])
@@ -758,11 +784,18 @@ class BuildPlans {
         this.save(id, journal);
         const stepSignal = AbortSignal.any([
           signal,
-          AbortSignal.timeout(p.structure ? 180000 : 120000),
+          AbortSignal.timeout(
+            p.image?.bytes?.length > 5 * 1024 * 1024
+              ? 30 * 60 * 1000
+              : p.structure
+                ? 180000
+                : 120000,
+          ),
         ]);
         const result = await agent.executeApproved(id, p, stepSignal);
         results.set(journal.steps[index].key, result);
         journal.steps[index].state = "verified";
+        journal.steps[index].done = doneText(p, result);
         this.save(id, journal);
       } catch (e) {
         const record = agent.records.find(

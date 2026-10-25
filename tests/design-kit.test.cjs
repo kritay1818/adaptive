@@ -74,6 +74,14 @@ const SAMPLES = {
     buttonLabel: "קבעו תור",
     buttonUrl: "/book/",
   },
+  "video-section": {
+    heading: "הסרטון שלנו",
+    videoUrl: "{{vid.url}}",
+    videoId: "{{vid.id}}",
+    posterUrl: "{{vid.url}}",
+    caption: "מאחורי הקלעים",
+    autoplay: true,
+  },
   header: {
     logoWidth: 140,
     showTitle: true,
@@ -90,6 +98,8 @@ const SAMPLES = {
 };
 const resolve = (html) =>
   html
+    .replaceAll("{{vid.url}}", "https://s.example/wp-content/uploads/v.mp4")
+    .replaceAll("{{vid.id}}", "55")
     .replaceAll("{{hero.url}}", IMG)
     .replaceAll("{{hero.id}}", "42")
     .replaceAll("{{menu.id}}", "7");

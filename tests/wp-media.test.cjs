@@ -388,3 +388,179 @@ test("a scanner-captured graphic is uploaded from held PNG bytes (no download), 
       undefined,
     );
 });
+
+const mp4Bytes = Buffer.concat([
+  Buffer.from([0, 0, 0, 24]),
+  Buffer.from("ftypisom"),
+  Buffer.from([0, 0, 2, 0]),
+  Buffer.from("isomiso2"),
+  Buffer.alloc(2048, 7),
+]);
+const hold = (agent, extra = {}) =>
+  agent.holdFile("p", {
+    id: "fvid0001ab",
+    name: "intro.mov",
+    kind: "video",
+    mime: "video/mp4",
+    bytes: mp4Bytes,
+    modelImage: null,
+    thumb: "",
+    ...extra,
+  });
+const userFile = (agent, args = {}) =>
+  agent.run(
+    "p",
+    [{ role: "user", content: "upload" }],
+    provider("wp_prepare_upload_user_file", {
+      fileId: "fvid0001ab",
+      fileName: "intro",
+      alt: "",
+      ...args,
+    }),
+  );
+
+test("a user video goes through the normal review, upload, verification, activity log and undo", async (t) => {
+  const { agent, calls, state } = await fixture(t);
+  hold(agent);
+  state.bytes = mp4Bytes; // what the site serves back for the verification download
+  state.item = {
+    id: 42,
+    status: "inherit",
+    title: { raw: "intro.mp4" },
+    alt_text: "",
+    media_type: "file",
+    mime_type: "video/mp4",
+    source_url: "https://public.example/wp-content/uploads/intro.mp4",
+    modified: "2026-10-13T10:00:00",
+  };
+  const result = await userFile(agent);
+  assert.equal(result.review.kind, "upload");
+  assert.equal(
+    result.review.payload.fileName,
+    "intro.mp4",
+    "the extension comes from the bytes, not from the name",
+  );
+  assert.equal(result.review.payload.mime, "video/mp4");
+  assert.equal(result.review.payload.bytes, mp4Bytes.length);
+  assert.match(result.review.warning, /סרטון/);
+  assert.equal(writes(calls).length, 0);
+  const progress = [];
+  agent.onProgress = (_id, text) => progress.push(text);
+  const done = await agent.decide("p", result.review.token, true);
+  assert.equal(done.outcome, "verified");
+  assert.match(done.text, /סרטון/);
+  assert.equal(writes(calls).length, 1);
+  assert.ok(
+    progress.some((p) => /מאמת/.test(p)),
+    "verification progress is reported",
+  );
+  assert.equal(
+    agent.heldFile("p", "fvid0001ab"),
+    null,
+    "a verified upload consumes the held file",
+  );
+  const row = agent.getActivityLog("p").find((e) => e.action === "upload");
+  assert.equal(row.state, "verified");
+  assert.equal(row.canUndo, true);
+  assert.equal((await agent.prepareUndo("p", row.id)).kind, "delete-media");
+});
+
+test("changed video bytes on the site fail verification instead of passing silently", async (t) => {
+  const { agent, state } = await fixture(t);
+  hold(agent);
+  state.bytes = Buffer.concat([mp4Bytes, Buffer.from([1])]);
+  state.item = {
+    id: 42,
+    status: "inherit",
+    title: { raw: "intro.mp4" },
+    alt_text: "",
+    media_type: "file",
+    mime_type: "video/mp4",
+    source_url: "https://public.example/wp-content/uploads/intro.mp4",
+    modified: "x",
+  };
+  const result = await userFile(agent);
+  assert.equal(
+    (await agent.decide("p", result.review.token, true)).outcome,
+    "unknown",
+  );
+  assert.equal(agent.isBlocked("p"), true);
+});
+
+test("a site upload size limit is explained in Hebrew and nothing is written or blocked", async (t) => {
+  const { agent, wp, calls } = await fixture(t);
+  hold(agent);
+  const original = wp.request;
+  wp.request = async (url, options) =>
+    options.method === "POST" &&
+    url.searchParams.get("rest_route") === "/wp/v2/media"
+      ? (calls.push({ url, options }),
+        { status: 413, contentType: "text/html", body: "" })
+      : original(url, options);
+  const result = await userFile(agent);
+  const done = await agent.decide("p", result.review.token, true);
+  assert.equal(done.outcome, "denied");
+  assert.match(done.text, /מגבלת ההעלאה של השרת/);
+  assert.equal(agent.isBlocked("p"), false);
+  assert.equal(writes(calls).length, 1, "one POST, never retried");
+});
+
+test("user files: unknown or mismatched files are refused before any review", async (t) => {
+  const { agent } = await fixture(t);
+  hold(agent);
+  await assert.rejects(
+    userFile(agent, { fileId: "fnope000001" }),
+    /אינו זמין|לא צורף/,
+  );
+  hold(agent, { id: "fbad0000ab", mime: "video/webm" }); // bytes are MP4 but the entry claims WebM
+  await assert.rejects(
+    userFile(agent, { fileId: "fbad0000ab" }),
+    /MP4|WebM|תקינים/,
+  );
+  for (let i = 0; i < 12; i++)
+    agent.holdFile("q", {
+      id: `f${String(i).padStart(7, "0")}`,
+      name: "a.png",
+      kind: "image",
+      mime: "image/png",
+      bytes: png,
+      modelImage: null,
+      thumb: "",
+    });
+  assert.throws(
+    () =>
+      agent.holdFile("q", {
+        id: "fextra00001",
+        name: "a.png",
+        kind: "image",
+        mime: "image/png",
+        bytes: png,
+        modelImage: null,
+        thumb: "",
+      }),
+    /יותר מדי קבצים/,
+  );
+});
+
+test("a page with an external video is refused; one with the uploaded file passes the site rule", async (t) => {
+  const { agent } = await fixture(t);
+  const page = (src) =>
+    `<!-- wp:video --><figure class="wp-block-video"><video controls src="${src}"></video></figure><!-- /wp:video -->`;
+  assert.doesNotThrow(() =>
+    agent.checkMedia(
+      "p",
+      page("https://public.example/wp-content/uploads/a.mp4"),
+    ),
+  );
+  assert.throws(
+    () => agent.checkMedia("p", page("https://cdn.example/a.mp4")),
+    /אתר המחובר/,
+  );
+  assert.doesNotThrow(() =>
+    agent.checkMedia("p", page("https://plan-reference.invalid/vid.png"), true),
+  );
+  assert.throws(
+    () => agent.checkMedia("p", page("https://plan-reference.invalid/vid.png")),
+    /אתר המחובר/,
+  );
+});

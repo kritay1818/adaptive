@@ -44,6 +44,8 @@ html[dir=rtl] .ad-split.ad-side-right{flex-direction:row-reverse}
 .ad-cta{background:var(--ad-primary);color:#fff;text-align:center}
 .ad-cta h2,.ad-cta p{color:#fff}
 .ad-cta .ad-btn .wp-block-button__link{background:#fff;color:var(--ad-primary)}
+.ad-video{margin:0}
+.ad-video video{width:100%;height:auto;border-radius:var(--ad-radius);display:block}
 .ad-contact-item{text-align:center}
 .ad-contact-item strong{display:block;color:var(--ad-primary)}
 .ad-header{padding:12px var(--ad-gap);gap:12px 24px;align-items:center;box-sizing:border-box}

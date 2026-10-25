@@ -1,0 +1,412 @@
+/* ADActive brand theme: the ONE place for colors and fonts, shared by every window (pet bar, chat, model, WordPress, activity log).
+   Palette from the brand: night-navy surfaces, sky-blue accent, logo teal (#16BDD8) and night (#020A20), soft purple/teal glows.
+   Fonts are bundled in ./fonts (OFL): Assistant for text, Karantina (condensed Hebrew display) for titles. No remote fonts. */
+
+@font-face {
+  font-family: "Assistant";
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/assistant-hebrew-400-normal.woff2") format("woff2");
+  unicode-range: U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: "Assistant";
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/assistant-latin-400-normal.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF,
+    U+FFFD;
+}
+@font-face {
+  font-family: "Assistant";
+  font-weight: 600;
+  font-display: swap;
+  src: url("fonts/assistant-hebrew-600-normal.woff2") format("woff2");
+  unicode-range: U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: "Assistant";
+  font-weight: 600;
+  font-display: swap;
+  src: url("fonts/assistant-latin-600-normal.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF,
+    U+FFFD;
+}
+@font-face {
+  font-family: "Assistant";
+  font-weight: 700;
+  font-display: swap;
+  src: url("fonts/assistant-hebrew-700-normal.woff2") format("woff2");
+  unicode-range: U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: "Assistant";
+  font-weight: 700;
+  font-display: swap;
+  src: url("fonts/assistant-latin-700-normal.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF,
+    U+FFFD;
+}
+@font-face {
+  font-family: "Karantina";
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/karantina-hebrew-400-normal.woff2") format("woff2");
+  unicode-range: U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: "Karantina";
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/karantina-latin-400-normal.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF,
+    U+FFFD;
+}
+@font-face {
+  font-family: "Karantina";
+  font-weight: 700;
+  font-display: swap;
+  src: url("fonts/karantina-hebrew-700-normal.woff2") format("woff2");
+  unicode-range: U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: "Karantina";
+  font-weight: 700;
+  font-display: swap;
+  src: url("fonts/karantina-latin-700-normal.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF,
+    U+FFFD;
+}
+
+:root {
+  color-scheme: dark;
+
+  /* Fonts */
+  --ad-font-body:
+    "Assistant", "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  --ad-font-display:
+    "Karantina", "Assistant", "Segoe UI", system-ui, Arial, sans-serif;
+  --ad-font-mono: ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
+
+  /* Night-navy surfaces (large areas: soft, low contrast) */
+  --ad-bg-deep: #0f1530;
+  --ad-bg: #161d3d;
+  --ad-surface: #1f2852;
+  --ad-surface-2: #283263;
+  --ad-surface-3: #323d75;
+  --ad-line: #3b4680;
+  --ad-line-soft: #2a346a;
+
+  /* Text: off-white, muted secondary */
+  --ad-text: #eef1fb;
+  --ad-text-2: #c9cfe8;
+  --ad-muted: #939dc8;
+
+  /* Accent: bright sky blue, only for primary actions and key states */
+  --ad-accent: #5bc4f5;
+  --ad-accent-hover: #7bd1f8;
+  --ad-accent-deep: #2f7fb8;
+  --ad-accent-bg: #1d3a5f;
+  --ad-accent-ink: #06203a;
+  --ad-accent-2: #16bdd8; /* logo teal */
+
+  /* Background glow (very subtle): purple-magenta on one side, teal on the other */
+  --ad-glow-purple: #7a3e73;
+  --ad-glow-teal: #2f7f8f;
+  --ad-glow-bg:
+    radial-gradient(
+      70% 55% at 0% 0%,
+      color-mix(in srgb, var(--ad-glow-purple) 26%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      70% 55% at 100% 100%,
+      color-mix(in srgb, var(--ad-glow-teal) 24%, transparent),
+      transparent 70%
+    ),
+    var(--ad-bg);
+
+  /* Semantic colors that read well on navy */
+  --ad-ok: #86e0a8;
+  --ad-ok-line: #2f7a5a;
+  --ad-ok-bg: #173a38;
+  --ad-warn: #f4c780;
+  --ad-warn-line: #8c6c33;
+  --ad-warn-bg: #3a3322;
+  --ad-err: #ff9fae;
+  --ad-err-line: #b04f68;
+  --ad-err-bg: #3d2139;
+
+  /* Shape and depth */
+  --ad-radius: 14px;
+  --ad-radius-sm: 10px;
+  --ad-shadow: 0 8px 28px rgb(4 6 20 / 0.38);
+  --ad-shadow-sm: 0 2px 10px rgb(4 6 20 / 0.28);
+  --ad-focus: 0 0 0 3px color-mix(in srgb, var(--ad-accent) 45%, transparent);
+}
+
+/* Titles use the condensed Hebrew display face; body text the readable face. */
+h1,
+h2,
+h3 {
+  font-family: var(--ad-font-display);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+h1 {
+  font-size: 1.55em;
+}
+h2 {
+  font-size: 1.35em;
+}
+h3 {
+  font-size: 1.2em;
+}
+::selection {
+  background: color-mix(in srgb, var(--ad-accent) 35%, transparent);
+}
+body:not(.pet-window) :focus-visible {
+  outline: none;
+  box-shadow: var(--ad-focus);
+}
+
+/* ------------------------------------------------------------------------------------------------------------------
+   Theme layer (this file is linked LAST in every window): soft surfaces, accent only for primary actions and key states,
+   readable cards. Colors come only from the variables above.
+   ------------------------------------------------------------------------------------------------------------------ */
+body.themed {
+  background: var(--ad-glow-bg) fixed;
+  color: var(--ad-text);
+}
+body:not(.pet-window) .shell,
+body.history-window .shell {
+  background: var(--ad-glow-bg);
+  border-color: var(--ad-line-soft);
+  box-shadow: var(--ad-shadow);
+}
+body.history-window {
+  background: var(--ad-bg);
+}
+
+/* Buttons: calm by default, bright accent only for primary actions */
+body:not(.pet-window) button {
+  background: var(--ad-surface-2);
+  color: var(--ad-text);
+  border-color: var(--ad-line);
+}
+body:not(.pet-window) button:hover:not(:disabled) {
+  background: var(--ad-surface-3);
+}
+body:not(.pet-window) button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+body:not(.pet-window) .primary,
+body:not(.pet-window) .send:not(.stop),
+body:not(.pet-window) #wp-test,
+body:not(.pet-window) #wp-approve,
+body:not(.pet-window) #confirm-connect,
+body:not(.pet-window) .view-site {
+  background: var(--ad-accent);
+  color: var(--ad-accent-ink);
+  border-color: transparent;
+  font-weight: 700;
+}
+body:not(.pet-window) .primary:hover:not(:disabled),
+body:not(.pet-window) .send:not(.stop):hover:not(:disabled),
+body:not(.pet-window) #wp-test:hover:not(:disabled),
+body:not(.pet-window) #wp-approve:hover:not(:disabled),
+body:not(.pet-window) #confirm-connect:hover:not(:disabled),
+body:not(.pet-window) .view-site:hover:not(:disabled) {
+  background: var(--ad-accent-hover);
+}
+body:not(.pet-window) .send.stop {
+  background: var(--ad-err-line);
+  color: var(--ad-text);
+}
+body:not(.pet-window) button.link,
+body:not(.pet-window) .icon {
+  background: none;
+}
+body:not(.pet-window) button.link {
+  color: var(--ad-accent);
+  border: 0;
+}
+
+/* Inputs */
+body:not(.pet-window) input,
+body:not(.pet-window) textarea,
+body:not(.pet-window) select {
+  background: var(--ad-bg-deep);
+  color: var(--ad-text);
+  border-color: var(--ad-line);
+}
+body:not(.pet-window) input::placeholder,
+body:not(.pet-window) textarea::placeholder {
+  color: var(--ad-muted);
+}
+body:not(.pet-window) input:focus,
+body:not(.pet-window) textarea:focus,
+body:not(.pet-window) select:focus {
+  border-color: var(--ad-accent);
+}
+
+/* Titles */
+body:not(.pet-window) #history-title {
+  font-size: 24px;
+}
+body:not(.pet-window) .wp-review h3,
+body:not(.pet-window) .settings-heading h2 {
+  font-size: 21px;
+}
+body:not(.pet-window) .review-summary p {
+  font-family: var(--ad-font-body);
+}
+
+/* Chat */
+body.history-window #history-heading,
+body.history-window #chat-form {
+  background: color-mix(in srgb, var(--ad-bg-deep) 70%, transparent);
+  border-color: var(--ad-line-soft);
+}
+body.history-window .msg.user {
+  background: var(--ad-accent-bg);
+  color: var(--ad-text);
+}
+body.history-window .msg.assistant {
+  background: var(--ad-surface);
+  color: var(--ad-text);
+}
+body.history-window .msg {
+  box-shadow: var(--ad-shadow-sm);
+}
+body.history-window .msg time {
+  color: var(--ad-muted);
+}
+body.history-window .date-sep {
+  background: var(--ad-surface);
+  color: var(--ad-text-2);
+}
+
+/* Result cards and error bubbles: very readable on navy */
+body.history-window .msg.result.ok {
+  background: var(--ad-ok-bg);
+  border-color: var(--ad-ok-line);
+  color: var(--ad-text);
+}
+body.history-window .msg.result.warn {
+  background: var(--ad-warn-bg);
+  border-color: var(--ad-warn-line);
+  color: var(--ad-text);
+}
+body.history-window .msg.result.bad,
+body:not(.pet-window) .bubble.error {
+  background: var(--ad-err-bg);
+  border-color: var(--ad-err-line);
+  color: var(--ad-text);
+}
+body:not(.pet-window) .result-line {
+  font-size: 15px;
+  line-height: 1.55;
+}
+body:not(.pet-window) .review-state.ok {
+  background: var(--ad-ok-bg);
+  border-color: var(--ad-ok-line);
+  color: var(--ad-ok);
+}
+body:not(.pet-window) .review-state.denied {
+  background: var(--ad-err-bg);
+  border-color: var(--ad-err-line);
+  color: var(--ad-err);
+}
+body:not(.pet-window) .review-state.warn {
+  background: var(--ad-warn-bg);
+  border-color: var(--ad-warn-line);
+  color: var(--ad-warn);
+}
+
+/* Review card: the most important surface, clearly separated and highly legible */
+body.history-window .bubble.wp-review {
+  background: var(--ad-surface);
+  border: 2px solid var(--ad-accent);
+  border-radius: var(--ad-radius);
+  box-shadow:
+    var(--ad-shadow),
+    0 0 0 4px color-mix(in srgb, var(--ad-accent) 14%, transparent);
+  color: var(--ad-text);
+}
+body:not(.pet-window) .review-summary p {
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--ad-text);
+}
+body:not(.pet-window) .review-summary ul {
+  font-size: 14px;
+  color: var(--ad-text-2);
+}
+body:not(.pet-window) .wp-review .review-warning {
+  color: var(--ad-text-2);
+  font-size: 13px;
+}
+body:not(.pet-window) .review-countdown {
+  color: var(--ad-accent);
+}
+body:not(.pet-window) .review-countdown.low {
+  color: var(--ad-warn);
+}
+body:not(.pet-window) .wp-review pre,
+body:not(.pet-window) .review-tech pre {
+  background: var(--ad-bg-deep);
+  color: var(--ad-text-2);
+  border: 1px solid var(--ad-line-soft);
+  border-radius: var(--ad-radius-sm);
+  font-family: var(--ad-font-mono);
+}
+body:not(.pet-window) #wp-deny {
+  background: var(--ad-surface-2);
+}
+
+/* Progress, notices, hints */
+body:not(.pet-window) .progress-line {
+  color: var(--ad-accent);
+}
+body:not(.pet-window) #notice[role="alert"] {
+  color: var(--ad-err);
+}
+body:not(.pet-window) .hint,
+body:not(.pet-window) .privacy {
+  color: var(--ad-muted);
+}
+body:not(.pet-window) .file-chip,
+body:not(.pet-window) .file-modes button {
+  border-color: var(--ad-line);
+}
+body:not(.pet-window) .file-modes button.on {
+  background: var(--ad-accent-bg);
+  border-color: var(--ad-accent);
+  color: var(--ad-text);
+}
+body:not(.pet-window) .empty-state .example:hover {
+  border-color: var(--ad-accent);
+}
+body.history-window .conn-dot.ok {
+  background: var(--ad-ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ad-ok) 25%, transparent);
+}
+body.history-window .conn-dot {
+  background: var(--ad-err);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ad-err) 25%, transparent);
+}
+body:not(.pet-window) #composer:focus-visible {
+  box-shadow: none;
+}

@@ -884,3 +884,77 @@ test("header, footer and logo are refused on a classic theme with a manual-handl
     );
   assert.equal(writes(f).length, 0);
 });
+
+test("result cards say what each step did, and the view button matches what exists", async (t) => {
+  const f = await fixture(t, { block: true, ref: true });
+  f.state.settings.site_logo = 0;
+  const logoPlan = await prepare(f.agent, "wp_prepare_build_plan", {
+    title: "לוגו",
+    steps: [
+      {
+        key: "logo",
+        tool: "wp_prepare_upload_image",
+        args: {
+          url: "https://images.example/logo.png",
+          fileName: "logo.png",
+          alt: "לוגו",
+        },
+      },
+      {
+        key: "mark",
+        tool: "wp_prepare_site_logo",
+        args: { mediaId: "{{logo.id}}" },
+      },
+    ],
+  });
+  const done = await f.agent.decide("p", logoPlan.review.token, true);
+  const lines = done.text.split("\n");
+  assert.match(lines[0], /^✅ התוכנית בוצעה: 2 מתוך 2 שלבים/);
+  assert.equal(lines[1], "✅ התמונה הועלתה לספריית המדיה (logo.png)");
+  assert.equal(lines[2], "✅ הלוגו הוגדר");
+  assert.equal(
+    done.view,
+    logoPlan.review.token,
+    "upload + logo -> the site's home page can be opened",
+  );
+  // Media-only plan: the button opens the media item (main resolves it from the verified upload record).
+  const mediaPlan = await prepare(f.agent, "wp_prepare_build_plan", {
+    title: "תמונה",
+    steps: [
+      {
+        key: "pic",
+        tool: "wp_prepare_upload_image",
+        args: {
+          url: "https://images.example/pic.png",
+          fileName: "pic.png",
+          alt: "x",
+        },
+      },
+    ],
+  });
+  const media = await f.agent.decide("p", mediaPlan.review.token, true);
+  assert.equal(
+    media.text.split("\n")[1],
+    "✅ התמונה הועלתה לספריית המדיה (pic.png)",
+  );
+  assert.ok(media.view);
+  // A single upload says it plainly too.
+  const single = await prepare(f.agent, "wp_prepare_upload_image", {
+    url: "https://images.example/one.png",
+    fileName: "one.png",
+    alt: "x",
+  });
+  const one = await f.agent.decide("p", single.review.token, true);
+  assert.match(
+    one.text,
+    /^✅ התמונה הועלתה לספריית המדיה \(one\.png\) — אומת באתר/,
+  );
+  assert.ok(one.view);
+  // Undoing creates nothing to open: no button.
+  const row = f.agent
+    .getActivityLog("p")
+    .find((e) => e.action === "upload" && e.title === "one.png");
+  const undo = await f.agent.prepareUndo("p", row.id);
+  const undone = await f.agent.decide("p", undo.token, true);
+  assert.equal(undone.view, undefined);
+});

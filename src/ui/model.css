@@ -6,14 +6,9 @@
 }
 body {
   margin: 0;
-  background: #202029;
-  color: #eeeef2;
-  font:
-    13px -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Arial,
-    sans-serif;
+  background: var(--ad-surface);
+  color: var(--ad-text);
+  font: 14px/1.5 var(--ad-font-body);
 }
 main {
   max-width: 560px;
@@ -25,7 +20,7 @@ header {
   justify-content: space-between;
   align-items: center;
   padding-bottom: 14px;
-  border-bottom: 1px solid #383840;
+  border-bottom: 1px solid var(--ad-surface-3);
 }
 header img {
   width: 116px;
@@ -36,7 +31,7 @@ h1 {
   margin: 18px 0 8px;
 }
 p {
-  color: #b6b6c2;
+  color: var(--ad-text-2);
   line-height: 1.6;
   font-size: 12px;
   overflow-wrap: anywhere;
@@ -48,9 +43,9 @@ label {
 input,
 select {
   width: 100%;
-  background: #292932;
-  color: #eeeef2;
-  border: 1px solid #474752;
+  background: var(--ad-surface-2);
+  color: var(--ad-text);
+  border: 1px solid var(--ad-line);
   border-radius: 8px;
   padding: 9px;
   font: inherit;
@@ -62,18 +57,18 @@ option {
   padding: 5px;
 }
 button {
-  border: 1px solid #474752;
+  border: 1px solid var(--ad-line);
   border-radius: 8px;
   padding: 9px 14px;
-  background: #292932;
-  color: #eeeef2;
+  background: var(--ad-surface-2);
+  color: var(--ad-text);
   cursor: pointer;
   font: inherit;
 }
 #connect-model {
   width: 100%;
-  background: #e8e8ed;
-  color: #202029;
+  background: var(--ad-text);
+  color: var(--ad-accent-ink);
   font-weight: 600;
 }
 button:disabled {
@@ -81,19 +76,19 @@ button:disabled {
   cursor: default;
 }
 :focus-visible {
-  outline: 2px solid #02c9fd;
+  outline: 2px solid var(--ad-accent);
   outline-offset: 3px;
 }
 #result {
   min-height: 36px;
-  color: #c1d8e8;
+  color: var(--ad-accent);
 }
 [hidden] {
   display: none !important;
 }
 .help-box {
-  background: #262633;
-  border: 1px solid #3d3d4d;
+  background: var(--ad-surface-2);
+  border: 1px solid var(--ad-surface-3);
   border-radius: 8px;
   padding: 12px 14px;
   margin: 10px 0;
@@ -101,7 +96,7 @@ button:disabled {
 .help-box ol {
   margin: 0;
   padding-inline-start: 20px;
-  color: #dcdce6;
+  color: var(--ad-text);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -113,7 +108,7 @@ button:disabled {
 }
 .help-box .help-note {
   margin: 9px 0 0;
-  color: #f0c674;
+  color: var(--ad-warn);
   font-size: 11.5px;
   line-height: 1.5;
 }
@@ -121,16 +116,16 @@ button:disabled {
   display: block;
   width: 100%;
   margin-top: 10px;
-  background: #2f2f3c;
-  border-color: #525262;
-  color: #eeeef2;
+  background: var(--ad-surface-2);
+  border-color: var(--ad-line);
+  color: var(--ad-text);
   font-size: 12px;
   padding: 8px 12px;
   text-align: center;
 }
 .help-box button:hover:not(:disabled) {
-  background: #3a3a49;
-  border-color: #68687a;
+  background: var(--ad-surface-3);
+  border-color: var(--ad-line);
 }
 @media (max-width: 360px) {
   main {

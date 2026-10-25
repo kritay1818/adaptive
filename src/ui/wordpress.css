@@ -6,14 +6,9 @@
 }
 body {
   margin: 0;
-  background: #202029;
-  color: #eeeef2;
-  font:
-    14px -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Arial,
-    sans-serif;
+  background: var(--ad-surface);
+  color: var(--ad-text);
+  font: 15px/1.5 var(--ad-font-body);
 }
 main {
   max-width: 640px;
@@ -25,7 +20,7 @@ header {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 1px solid #383840;
+  border-bottom: 1px solid var(--ad-surface-3);
   padding-bottom: 18px;
 }
 h1 {
@@ -34,7 +29,7 @@ h1 {
   letter-spacing: -0.4px;
 }
 p {
-  color: #b6b6c2;
+  color: var(--ad-text-2);
   line-height: 1.65;
   overflow-wrap: anywhere;
   font-size: 13px;
@@ -42,57 +37,57 @@ p {
 label {
   display: block;
   margin: 18px 0;
-  color: #e5e5ec;
+  color: var(--ad-text);
 }
 input {
   display: block;
   margin-top: 8px;
   width: 100%;
-  border: 1px solid #474752;
+  border: 1px solid var(--ad-line);
   border-radius: 10px;
   padding: 12px;
-  color: #eeeef2;
-  background: #292932;
+  color: var(--ad-text);
+  background: var(--ad-surface-2);
   font: inherit;
 }
 input::placeholder {
-  color: #a4a4b0;
+  color: var(--ad-text-2);
 }
 button {
   cursor: pointer;
-  border: 1px solid #474752;
+  border: 1px solid var(--ad-line);
   border-radius: 9px;
   padding: 10px 14px;
   font: inherit;
-  background: #292932;
-  color: #eeeef2;
+  background: var(--ad-surface-2);
+  color: var(--ad-text);
 }
 button:hover {
-  background: #363641;
+  background: var(--ad-surface-3);
 }
 #wp-test {
-  color: white;
-  background: #1b406d;
-  border-color: #527396;
+  color: var(--ad-text);
+  background: var(--ad-accent-bg);
+  border-color: var(--ad-accent-deep);
 }
 #wp-test:hover {
-  background: #295783;
+  background: var(--ad-accent-deep);
 }
 #wp-result {
   min-height: 42px;
-  color: #c1d8e8;
+  color: var(--ad-accent);
 }
 button:disabled {
   opacity: 0.5;
   cursor: default;
 }
 :focus-visible {
-  outline: 2px solid #02c9fd;
+  outline: 2px solid var(--ad-accent);
   outline-offset: 3px;
 }
 .help-box {
-  background: #262633;
-  border: 1px solid #3d3d4d;
+  background: var(--ad-surface-2);
+  border: 1px solid var(--ad-surface-3);
   border-radius: 10px;
   padding: 12px 14px;
   margin: 12px 0;
@@ -100,7 +95,7 @@ button:disabled {
 .help-box ol {
   margin: 0;
   padding-inline-start: 20px;
-  color: #dcdce6;
+  color: var(--ad-text);
   font-size: 12.5px;
   line-height: 1.6;
 }
@@ -112,7 +107,7 @@ button:disabled {
 }
 .help-box .help-note {
   margin: 8px 0 0;
-  color: #f0c674;
+  color: var(--ad-warn);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -120,4 +115,91 @@ button:disabled {
   main {
     padding: 16px;
   }
+}
+
+/* Connection helpers: shortcut button, hints, step-by-step guide */
+.field-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: -6px 0 6px;
+}
+.hint {
+  color: var(--ad-muted, var(--ad-muted));
+  font-size: 12px;
+  line-height: 1.6;
+}
+.sample {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 8px;
+  background: var(--ad-surface-2, var(--ad-surface-2));
+  color: var(--ad-text, var(--ad-text));
+  font-family: var(--ad-font-mono);
+}
+button.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--ad-accent, var(--ad-accent));
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+button.link:hover {
+  color: var(--ad-accent-hover, var(--ad-accent));
+}
+.guide {
+  max-width: 640px;
+  margin: auto;
+  padding: 28px;
+}
+.guide[hidden],
+main[hidden] {
+  display: none;
+}
+.guide-count {
+  text-align: center;
+  font-weight: 600;
+  color: var(--ad-text-2, var(--ad-text-2));
+}
+.guide-figure {
+  margin: 12px 0;
+  text-align: center;
+}
+.guide-figure img {
+  max-width: 100%;
+  max-height: 46vh;
+  border-radius: var(--ad-radius-sm, 10px);
+  border: 1px solid var(--ad-line, var(--ad-line));
+  box-shadow: var(--ad-shadow-sm, none);
+}
+.guide-figure img[hidden] {
+  display: none;
+}
+.guide-figure figcaption {
+  margin-top: 12px;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--ad-text, var(--ad-text));
+}
+.guide-nav {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+.guide-nav button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+#wp-open-passwords:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+#wp-open-model,
+#wp-open-passwords {
+  white-space: normal;
+  text-overflow: clip;
+  max-width: 100%;
 }

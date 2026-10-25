@@ -67,6 +67,8 @@ function request(
     binary = false,
     maxBytes = 262144,
     acceptedStatuses = [200, 201],
+    onProgress,
+    hashOnly = false,
   },
 ) {
   return new Promise((resolve, reject) => {
@@ -106,28 +108,48 @@ function request(
           res.destroy();
           return;
         }
+        const hash = hashOnly ? createHash("sha256") : null;
         res.on("data", (chunk) => {
           length += chunk.length;
           if (length > maxBytes) {
             res.destroy(new Error("size"));
             return;
           }
-          chunks.push(chunk);
+          if (hash) hash.update(chunk);
+          else chunks.push(chunk);
         });
         res.on("error", reject);
         res.on("end", () =>
           resolve({
             status: res.statusCode,
             contentType: res.headers?.["content-type"] || "",
-            body: binary
-              ? Buffer.concat(chunks)
-              : Buffer.concat(chunks).toString("utf8"),
+            ...(hash ? { sha256: hash.digest("hex"), length } : {}),
+            body: hash
+              ? Buffer.alloc(0)
+              : binary
+                ? Buffer.concat(chunks)
+                : Buffer.concat(chunks).toString("utf8"),
           }),
         );
       },
     );
     req.on("error", reject);
-    req.end(body);
+    if (onProgress && Buffer.isBuffer(body) && body.length > 1024 * 1024) {
+      // Large upload: write in chunks so the UI can show progress.
+      let offset = 0;
+      const total = body.length;
+      const pump = () => {
+        while (offset < total) {
+          const end = Math.min(offset + 262144, total);
+          const ok = req.write(body.subarray(offset, end));
+          offset = end;
+          onProgress(offset, total);
+          if (!ok) return void req.once("drain", pump);
+        }
+        req.end();
+      };
+      pump();
+    } else req.end(body);
   });
 }
 const IMAGE_LIMIT = 10 * 1024 * 1024;
@@ -236,13 +258,77 @@ function imageFields({ url, fileName, alt }) {
   )
     throw new Error("נדרשים שם קובץ בטוח עם סיומת תמונה וטקסט חלופי ללא HTML");
 }
+// ---- videos (upload by the user from the chat; type from magic bytes, never from the name) ----------------------
+const VIDEO_TYPES = { "video/mp4": "mp4", "video/webm": "webm" };
+const VIDEO_LIMIT = 200 * 1024 * 1024;
+const MEDIA_EXT = { ...IMAGE_TYPES, ...VIDEO_TYPES };
+const MP4_BRANDS = new Set([
+  "isom",
+  "iso2",
+  "iso3",
+  "iso4",
+  "iso5",
+  "iso6",
+  "mp41",
+  "mp42",
+  "avc1",
+  "dash",
+  "msdh",
+  "f4v ",
+  "M4V ",
+]);
+function sniffVideo(bytes) {
+  if (!Buffer.isBuffer(bytes) || bytes.length < 16) return null;
+  if (
+    bytes.toString("ascii", 4, 8) === "ftyp" &&
+    MP4_BRANDS.has(bytes.toString("ascii", 8, 12))
+  )
+    return "video/mp4";
+  if (
+    bytes[0] === 0x1a &&
+    bytes[1] === 0x45 &&
+    bytes[2] === 0xdf &&
+    bytes[3] === 0xa3 &&
+    bytes.toString("latin1", 0, Math.min(bytes.length, 64)).includes("webm")
+  )
+    return "video/webm";
+  return null;
+}
+const sniffMedia = (bytes) => sniffImage(bytes) || sniffVideo(bytes);
+function mediaType(bytes, mime) {
+  if (!Object.hasOwn(VIDEO_TYPES, mime)) return imageType(bytes, mime);
+  if (
+    !Buffer.isBuffer(bytes) ||
+    !bytes.length ||
+    bytes.length > VIDEO_LIMIT ||
+    sniffVideo(bytes) !== mime
+  )
+    throw new Error("מותרים סרטוני MP4 או WebM תקינים בלבד, עד 200 MB.");
+}
+function mediaFields({ url, fileName, alt }, mime) {
+  const video = Object.hasOwn(VIDEO_TYPES, mime);
+  if (!video) return imageFields({ url, fileName, alt });
+  imageURL(url);
+  text(fileName, 120);
+  text(alt ?? "", 1000);
+  if (
+    !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,100}\.(?:mp4|webm)$/i.test(fileName) ||
+    /[<>\x00-\x1f\x7f]/.test(alt ?? "")
+  )
+    throw new Error(
+      "נדרשים שם קובץ בטוח עם סיומת mp4/webm וטקסט חלופי ללא HTML",
+    );
+}
 const imageDigest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 function mediaSummary(m) {
   if (
     !Number.isSafeInteger(m?.id) ||
     m.id <= 0 ||
-    m.media_type !== "image" ||
-    !Object.hasOwn(IMAGE_TYPES, m.mime_type) ||
+    !(
+      (m.media_type === "image" && Object.hasOwn(IMAGE_TYPES, m.mime_type)) ||
+      (Object.hasOwn(VIDEO_TYPES, m.mime_type) &&
+        ["file", "video"].includes(m.media_type))
+    ) ||
     typeof m.title?.raw !== "string" ||
     typeof m.alt_text !== "string" ||
     typeof m.source_url !== "string" ||
@@ -529,6 +615,15 @@ class WordPress {
     if (result.id !== pageId) throw new Error("האתר החזיר עמוד אחר");
     return result;
   }
+  // Link to the Application Passwords section of the user's profile. Same rules as the connection (https, public host,
+  // no credentials/params); main builds the path itself, the renderer only supplies the typed site URL.
+  async adminPasswordsURL(site, signal) {
+    const base = siteURL(site);
+    await this.publicTarget(base, signal);
+    const url = new URL("wp-admin/profile.php", base);
+    url.hash = "application-passwords-section";
+    return url.href;
+  }
   async publicTarget(url, signal) {
     signal.throwIfAborted();
     const addresses = await new Promise((resolve, reject) => {
@@ -606,9 +701,9 @@ class WordPress {
         : !Number.isSafeInteger(mediaId) || mediaId <= 0)
     )
       throw new Error("פעולת מדיה אינה מורשית");
-    const combined = signal
-      ? AbortSignal.any([signal, AbortSignal.timeout(15000)])
-      : AbortSignal.timeout(15000);
+    // Uploads (up to 200 MB) get a long limit; every other media request keeps 15 seconds.
+    const deadline = AbortSignal.timeout(upload ? 30 * 60 * 1000 : 15000);
+    const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
     try {
       const credential = JSON.parse(
         this.storage.decryptString(Buffer.from(this.data[id], "base64")),
@@ -632,11 +727,45 @@ class WordPress {
             "base64",
           ),
         ...(upload
-          ? { body: upload.body, contentType: upload.contentType }
+          ? {
+              body: upload.body,
+              contentType: upload.contentType,
+              onProgress: upload.onProgress,
+            }
           : {}),
-        acceptedStatuses: method === "GET" ? [200, 404] : [200, 201],
+        // Upload refusals are read (small JSON) to tell "file too large for this site" from other refusals.
+        acceptedStatuses:
+          method === "GET"
+            ? [200, 404]
+            : upload
+              ? [200, 201, 400, 413, 415, 500]
+              : [200, 201],
       });
       combined.throwIfAborted();
+      if (upload && [400, 413, 415, 500].includes(result.status)) {
+        let code = "",
+          message = "";
+        try {
+          const j = JSON.parse(String(result.body).slice(0, 8192));
+          code = String(j?.code || "");
+          message = String(j?.message || "");
+        } catch {
+          /* no JSON body */
+        }
+        if (
+          result.status === 413 ||
+          /too_big|too_large|exceeds the maximum upload size|upload_max_filesize|post_max_size|too large/i.test(
+            code + " " + message,
+          )
+        )
+          throw Object.assign(
+            new Error(
+              "האתר דחה את הקובץ כי הוא גדול ממגבלת ההעלאה של השרת (upload_max_filesize / post_max_size). לא נכתב דבר. אפשר להקטין את הקובץ, או לבקש ממנהל האתר/האחסון להגדיל את המגבלה.",
+            ),
+            { notApplied: true, refused: true },
+          );
+        if (result.status === 500) throw new Error("response"); // ambiguous: the existing unknown-outcome handling applies
+      }
       // An explicit client-error refusal of an upload (e.g. unsupported file type) means nothing was written.
       if (
         method === "POST" &&
@@ -691,16 +820,16 @@ class WordPress {
     if (item.id !== mediaId) throw new Error("האתר החזיר פריט מדיה אחר");
     return item;
   }
-  async uploadImage(id, image, fields, signal) {
-    imageFields(fields);
-    imageType(image.bytes, image.mime);
+  async uploadImage(id, image, fields, signal, onProgress) {
+    mediaFields(fields, image.mime);
+    mediaType(image.bytes, image.mime);
     const extension = fields.fileName
       .split(".")
       .pop()
       .toLowerCase()
       .replace("jpeg", "jpg");
-    if (extension !== IMAGE_TYPES[image.mime])
-      throw new Error("סיומת הקובץ אינה תואמת לתמונה");
+    if (extension !== MEDIA_EXT[image.mime])
+      throw new Error("סיומת הקובץ אינה תואמת לסוג הקובץ");
     const boundary = "ADActive" + randomUUID().replaceAll("-", "");
     const body = Buffer.concat([
       Buffer.from(
@@ -719,8 +848,35 @@ class WordPress {
       await this.mediaRequest(id, null, "POST", signal, {
         body,
         contentType: `multipart/form-data; boundary=${boundary}`,
+        onProgress,
       }),
     );
+  }
+  // sha256 of a public file on the connected site, streamed (used to verify uploaded videos without buffering them).
+  async hashFile(value, signal, maxBytes = VIDEO_LIMIT) {
+    const combined = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(30 * 60 * 1000)])
+      : AbortSignal.timeout(30 * 60 * 1000);
+    try {
+      const url = imageURL(value);
+      const target = await this.publicTarget(url, combined);
+      const result = await this.request(url, {
+        ...target,
+        signal: combined,
+        method: "GET",
+        binary: true,
+        maxBytes,
+        hashOnly: true,
+      });
+      combined.throwIfAborted();
+      if (result.status !== 200) throw new Error("response");
+      return {
+        sha256: result.sha256 ?? imageDigest(result.body),
+        length: result.length ?? result.body.length,
+      };
+    } catch {
+      throw new Error("אימות הקובץ שהועלה לאתר נכשל (הורדה חוזרת לא הצליחה).");
+    }
   }
   async deleteMedia(id, mediaId, signal) {
     const result = await this.mediaRequest(id, mediaId, "DELETE", signal);
@@ -844,4 +1000,11 @@ module.exports = {
   imageType,
   sniffImage,
   IMAGE_TYPES,
+  VIDEO_TYPES,
+  VIDEO_LIMIT,
+  MEDIA_EXT,
+  sniffVideo,
+  sniffMedia,
+  mediaType,
+  mediaFields,
 };

@@ -2,12 +2,12 @@
 const { text } = require("./core.cjs");
 
 const BLOCKS = new Set(
-  "image gallery columns column group cover buttons button separator spacer heading paragraph list list-item quote".split(
+  "image gallery columns column group cover buttons button separator spacer heading paragraph list list-item quote video".split(
     " ",
   ),
 );
 const TAGS = new Set(
-  "p h1 h2 h3 h4 h5 h6 div section span ul ol li strong em b i br hr a figure figcaption img blockquote cite".split(
+  "p h1 h2 h3 h4 h5 h6 div section span ul ol li strong em b i br hr a figure figcaption img blockquote cite video".split(
     " ",
   ),
 );
@@ -223,6 +223,19 @@ const attributes = {
     ),
     focalPoint: (v) => object(v, { x: number(0, 1), y: number(0, 1) }),
   },
+  // Core video block with an uploaded file only: https src/poster; the site-origin rule is enforced where the site is known
+  // (assertSiteMedia). No embeds, no external players.
+  video: {
+    id: positiveId,
+    src: contentURL,
+    poster: contentURL,
+    controls: bool,
+    autoplay: bool,
+    muted: bool,
+    loop: bool,
+    playsInline: bool,
+    preload: choice("auto", "metadata", "none"),
+  },
   buttons: {},
   button: { width: choice(25, 50, 75, 100), tagName: choice("a") },
   separator: { opacity: choice("alpha-channel", "css") },
@@ -376,6 +389,11 @@ function htmlAttribute(tag, key, value) {
     if (key === "data-object-position")
       return /^\d{1,3}(?:\.\d+)?% \d{1,3}(?:\.\d+)?%$/.test(value);
   }
+  if (tag === "video") {
+    if (key === "src" || key === "poster") return contentURL(value);
+    if (key === "preload") return ["auto", "metadata", "none"].includes(value);
+    if (["width", "height"].includes(key)) return /^\d{1,5}$/.test(value);
+  }
   if (tag === "a") {
     if (key === "href") return contentLink(value, true) || contactLink(value);
     if (key === "target") return ["_blank", "_self"].includes(value);
@@ -383,6 +401,38 @@ function htmlAttribute(tag, key, value) {
   }
   if (tag === "ol" && key === "start") return /^\d{1,6}$/.test(value);
   return false;
+}
+// Videos may only be files uploaded to THIS site: every <video src/poster> and wp:video src/poster must live on the
+// connected site's origin (plan references resolve to a mock host while a plan is only being prepared).
+const MOCK_HOST = "plan-reference.invalid";
+function assertSiteMedia(content, siteOrigin, { allowMock = false } = {}) {
+  const urls = [];
+  for (const m of content.matchAll(/<video\b[^>]*>/gi))
+    for (const a of m[0].matchAll(/\b(?:src|poster)\s*=\s*"([^"]*)"/gi))
+      urls.push(a[1]);
+  for (const m of content.matchAll(
+    /<!--\s*wp:video\s+(\{[\s\S]*?\})\s*\/?-->/g,
+  )) {
+    try {
+      const attrs = JSON.parse(m[1]);
+      for (const k of ["src", "poster"])
+        if (typeof attrs[k] === "string") urls.push(attrs[k]);
+    } catch {
+      /* the validator rejects it */
+    }
+  }
+  for (const value of urls) {
+    let u;
+    try {
+      u = new URL(value.replace(/&amp;/g, "&"));
+    } catch {
+      fail(`כתובת וידאו לא תקינה: ${value.slice(0, 60)}`);
+    }
+    if (u.origin !== siteOrigin && !(allowMock && u.hostname === MOCK_HOST))
+      fail(
+        `וידאו מותר רק מקובץ שהועלה לאתר המחובר (${siteOrigin}); כתובת חיצונית או הטמעה אסורות: ${u.origin}`,
+      );
+  }
 }
 function safeHTML(source, template = false) {
   text(source, 60000);
@@ -471,6 +521,21 @@ function safeHTML(source, template = false) {
         offset += close[0].length;
         break;
       }
+      if (tag === "video") {
+        // Bare boolean attributes, exactly as Gutenberg serializes them: <video controls muted ...>
+        const bare =
+          /^\s+(controls|autoplay|muted|loop|playsinline)(?=[\s/>])/i.exec(
+            source.slice(offset),
+          );
+        if (bare) {
+          const flag = bare[1].toLowerCase();
+          if (seen.has(flag))
+            fail(`המאפיין "${flag}" מופיע פעמיים בתג <video>`);
+          seen.add(flag);
+          offset += bare[0].length;
+          continue;
+        }
+      }
       const attr =
         /^\s+([a-zA-Z][a-zA-Z0-9-]*)\s*=\s*(?:"([^"<>]*)"|'([^'<>]*)')/.exec(
           source.slice(offset),
@@ -506,4 +571,5 @@ module.exports = {
   contentURL,
   contentLink,
   contactLink,
+  assertSiteMedia,
 };

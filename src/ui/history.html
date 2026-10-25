@@ -5,10 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'"
     />
     <title>ADActive — שיחה</title>
     <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="theme.css" />
   </head>
   <body class="history-window">
     <div class="shell">
@@ -119,6 +120,10 @@
                 ⋯
               </summary>
               <div class="chat-more-menu">
+                <button id="chat-open-model" type="button">
+                  חיבור מודל (מפתח API)…
+                </button>
+                <button id="chat-open-wp" type="button">חיבור האתר…</button>
                 <button id="chat-export-md" type="button">
                   ייצוא 20 ההודעות האחרונות · .md
                 </button>
@@ -131,6 +136,7 @@
           </div>
         </header>
         <form id="chat-form">
+          <div id="file-chips" class="file-chips" hidden></div>
           <div class="composer-box">
             <img class="command-mark" src="brand-logo.svg" alt="ADActive" />
             <button
@@ -169,12 +175,11 @@
               id="attach-image"
               class="icon"
               type="button"
-              aria-label="צירוף תמונת השראה"
-              title="צירוף תמונת השראה (PNG / JPG / WebP, עד 5 MB)"
+              aria-label="צירוף תמונות וסרטונים"
+              title="צירוף תמונות וסרטונים (תמונה עד 10 MB, סרטון עד 200 MB)"
             >
               📎
             </button>
-            <span id="image-chip" class="image-chip" hidden></span>
             <textarea
               id="composer"
               aria-label="הודעה"
@@ -361,6 +366,7 @@
         </div>
       </form>
     </dialog>
+    <script src="markdown.js"></script>
     <script src="renderer.js"></script>
   </body>
 </html>

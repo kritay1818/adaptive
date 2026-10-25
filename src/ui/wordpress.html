@@ -9,15 +9,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>חיבור WordPress · ADActive</title>
     <link rel="stylesheet" href="wordpress.css" />
+    <link rel="stylesheet" href="theme.css" />
   </head>
-  <body>
+  <body class="themed">
     <main aria-labelledby="wp-title">
       <header>
         <h1 id="wp-title">חיבור WordPress</h1>
         <button id="wp-close" type="button">סגירה</button>
       </header>
       <p id="wp-project"></p>
-      <p>חיבור לאתר של הפרויקט בלבד — ללא הגדרות מודל וללא בקשות AI.</p>
+      <p>חיבור לאתר של הפרויקט בלבד — ללא בקשות AI.</p>
+      <p>
+        <button id="wp-open-model" type="button">
+          חיבור מודל AI (מפתח API)…
+        </button>
+        — המודל מחובר בחלון נפרד ומאובטח, ומשותף לכל הפרויקטים.
+      </p>
       <form id="wp-form">
         <label
           >כתובת האתר (HTTPS)<input
@@ -29,8 +36,17 @@
             autocomplete="off"
             placeholder="https://example.com"
         /></label>
+        <p class="field-actions">
+          <button id="wp-open-passwords" type="button" disabled>
+            פתיחת עמוד הסיסמאות באתר שלי
+          </button>
+          <span class="hint"
+            >אחרי שהכתובת הוקלדה: נפתח עמוד הפרופיל באתר, שם יוצרים את סיסמת
+            היישום.</span
+          >
+        </p>
         <label
-          >שם משתמש<input
+          >שם משתמש (של ניהול האתר)<input
             id="wp-username"
             dir="ltr"
             maxlength="256"
@@ -39,7 +55,7 @@
             spellcheck="false"
         /></label>
         <label
-          >Application Password<input
+          >סיסמת יישום (Application Password)<input
             id="wp-password"
             type="password"
             dir="ltr"
@@ -48,24 +64,14 @@
             autocomplete="off"
             spellcheck="false"
         /></label>
-        <div id="wp-help" class="help-box">
-          <ol>
-            <li>
-              מתחברים לניהול האתר (WordPress admin) ועוברים אל
-              <strong>משתמשים (Users) ← פרופיל (Profile)</strong>.
-            </li>
-            <li>
-              גוללים למטה אל <strong>Application Passwords</strong>, נותנים שם
-              לסיסמה (למשל: ADActive) ולוחצים על
-              <strong>Add New Application Password</strong>.
-            </li>
-            <li>מעתיקים את הסיסמה שנוצרה ומדביקים אותה כאן למעלה.</li>
-          </ol>
-          <p class="help-note">
-            זו אינה סיסמת הכניסה הרגילה לאתר, אלא סיסמת יישום ייעודית
-            (Application Password).
-          </p>
-        </div>
+        <p id="wp-password-hint" class="hint">
+          זו <strong>לא</strong> סיסמת הכניסה הרגילה לאתר, אלא סיסמת יישום
+          ייעודית: 24 תווים עם רווחים, בצורה
+          <span dir="ltr" class="sample">abcd efgh ijkl mnop qrst uvwx</span>.
+          <button id="wp-guide-open" type="button" class="link">
+            איך יוצרים סיסמת יישום?
+          </button>
+        </p>
         <p>
           סיסמת יישום ממשתמשים ← פרופיל ב־WordPress, לא סיסמת הכניסה הרגילה.
           נשמרת מוצפנת במחשב רק לאחר הצלחה ואינה נשלחת למודל.
@@ -78,8 +84,26 @@
         <p id="wp-result" role="status">
           בדיקת קריאה בלבד. אין שינוי בתוכן האתר.
         </p>
+        <button id="wp-result-guide" type="button" class="link" hidden>
+          איך יוצרים?
+        </button>
       </form>
     </main>
+    <section id="wp-guide" class="guide" hidden aria-labelledby="guide-title">
+      <header>
+        <h1 id="guide-title">איך יוצרים סיסמת יישום?</h1>
+        <button id="guide-close" type="button">חזרה</button>
+      </header>
+      <p id="guide-count" class="guide-count" role="status"></p>
+      <figure class="guide-figure">
+        <img id="guide-img" alt="" />
+        <figcaption id="guide-text"></figcaption>
+      </figure>
+      <div class="guide-nav">
+        <button id="guide-next" type="button">הבא</button>
+        <button id="guide-back" type="button">הקודם</button>
+      </div>
+    </section>
     <script src="wordpress-ui.js"></script>
   </body>
 </html>

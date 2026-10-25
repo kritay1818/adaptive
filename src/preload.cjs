@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld(
     openWordPress: () => call("openWordPress"),
     wordPressState: () => call("wordPressState"),
     testWordPress: (fields) => call("testWordPress", fields),
+    openPasswordPage: (site) => call("openPasswordPage", { site }),
     closeWordPress: () => call("closeWordPress"),
     onWordPressReset: (callback) => {
       const listener = () => callback();
@@ -58,7 +59,8 @@ contextBridge.exposeInMainWorld(
     send: (fields) => call("send", fields),
     decideWordPress: (fields) => call("decideWordPress", fields),
     cancelWordPress: () => call("cancelWordPress"),
-    pickImage: () => call("pickImage"),
+    pickFiles: () => call("pickFiles"),
+    dropFile: (id) => call("dropFile", { id }),
     openHelp: (target) => call("openHelp", { target }),
     resumeAction: (action) => call("resumeAction", { action }),
     openSite: (operation) => call("openSite", { operation }),

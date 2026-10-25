@@ -9,6 +9,9 @@ const {
   IMAGE_TYPES,
   sniffImage,
   imageType,
+  MEDIA_EXT,
+  mediaType,
+  mediaFields,
 } = require("./wordpress.cjs");
 const {
   SiteStructure,
@@ -16,6 +19,8 @@ const {
   validateStructure,
 } = require("./wp-structure.cjs");
 const { imageURL } = require("./wordpress.cjs");
+const { assertSiteMedia } = require("./wp-content.cjs");
+const { doneText, viewTarget } = require("./results.cjs");
 const { expandStep, describeKit } = require("./design-kit/index.cjs");
 const {
   emptyUsage,
@@ -158,6 +163,16 @@ function formatTrail(trail, price) {
 const draftNames = new Set(draftTools.map((t) => t.name));
 // The one-shot import tool is replaced by wp_plan_start with a sourceToken; its handler stays unreachable-by-model.
 tools.push({
+  name: "wp_prepare_upload_user_file",
+  description:
+    'Prepare uploading a file the USER attached in the chat for upload to the media library (fileId from the app note, e.g. f3k9x2ab). Images (jpg/png/webp/gif) and videos (mp4/webm). The app decides the real extension from the bytes; fileName is the base name. Needs the normal review. If the user wants the file as the site LOGO, ALSO add wp_prepare_site_logo {mediaId: "{{key.id}}"} in the SAME plan (an upload alone does not set a logo). Afterwards use {{key.url}} / {{key.id}} in image blocks, in the video-section pattern, or in a wp:video block (src must be this uploaded file).',
+  parameters: schema({ fileId: str, fileName: str, alt: str }, [
+    "fileId",
+    "fileName",
+    "alt",
+  ]),
+});
+tools.push({
   name: "wp_prepare_upload_scan_graphic",
   description:
     "Import only: prepare uploading a PNG crop of an icon or decorative graphic (inline SVG icon, CSS-drawn shape) that the scan captured from the rendered source page (see scan result graphics[] with ids like p1-g3). Never text. Needs approval like any upload; afterwards use {{key.url}} / {{key.id}} in image blocks exactly where the graphic appeared.",
@@ -238,7 +253,24 @@ function argumentsFor(name, args) {
   if (args.content !== undefined) safeHTML(args.content);
   if (name === "wp_prepare_upload_image") imageFields(args);
   if (name === "wp_prepare_upload_scan_graphic") graphicFields(args);
+  if (name === "wp_prepare_upload_user_file") userFileFields(args);
   return args;
+}
+function userFileFields({ fileId, fileName, alt }) {
+  if (!/^f[a-z0-9]{6,20}$/.test(fileId))
+    throw new Error(
+      "fileId חייב להיות מזהה קובץ מההערה של האפליקציה, למשל f3k9x2ab",
+    );
+  if (
+    !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,100}(?:\.[a-zA-Z0-9]{2,5})?$/.test(fileName)
+  )
+    throw new Error("שם הקובץ חייב להיות בטוח (אותיות לטיניות, ספרות, _ ו־-)");
+  if (
+    typeof alt !== "string" ||
+    alt.length > 1000 ||
+    /[<>\x00-\x1f\x7f]/.test(alt)
+  )
+    throw new Error("טקסט חלופי ללא HTML");
 }
 function graphicFields({ graphicId, fileName, alt }) {
   if (!/^p\d{1,2}-g\d{1,2}$/.test(graphicId))
@@ -262,6 +294,8 @@ const DESIGN_GUIDE = [
   'COVER (hero) EXAMPLE, valid as-is: <!-- wp:cover {"url":"{{hero.url}}","id":{{hero.id}},"dimRatio":50,"overlayColor":"black","minHeight":480,"isDark":true,"align":"full"} --><div class="wp-block-cover alignfull is-dark" style="min-height:480px"><span aria-hidden="true" class="wp-block-cover__background has-black-background-color has-background-dim"></span><img class="wp-block-cover__image-background wp-image-{{hero.id}}" alt="תיאור התמונה" src="{{hero.url}}" data-object-fit="cover"/><div class="wp-block-cover__inner-container"><!-- wp:heading {"level":1,"textAlign":"center"} --><h1 class="wp-block-heading has-text-align-center">כותרת קצרה</h1><!-- /wp:heading --><!-- wp:paragraph {"align":"center"} --><p class="has-text-align-center">שורת משנה אחת</p><!-- /wp:paragraph --></div></div><!-- /wp:cover --> (here {{hero.*}} refer to an earlier wp_prepare_upload_image step with key hero; you can also use a real media ID and an https URL). Without an image use no <img> and give the dim span style="background-color:#1f3a5f" with "customOverlayColor":"#1f3a5f". Always keep the img/span/inner-container structure, double quotes around every attribute value, and never use background-image CSS.',
   'HERO AND THEME TITLE (any site): when a page has its own hero, give its outermost block className "site-hero" and hide the theme\'s automatic page title only on such pages with this site-CSS rule: body:has(.site-hero) :is(.wp-block-post-title, .entry-title, .page-title) { display: none; }. ',
   "IMPORTED PAGES: build the hero section of an imported page as a COVER block with the uploaded background image (as in the cover example), with the original heading, text and button as inner blocks; do NOT use a plain image block for a hero.",
+  "LOGO: when the user asks to use an image as the site logo ('add this as the logo', 'תשים את זה כלוגו'), the SAME plan must upload it (wp_prepare_upload_user_file, or wp_prepare_upload_image for a URL) AND set it with wp_prepare_site_logo {mediaId: \"{{key.id}}\"}; an upload alone is not a logo. Call wp_read_site_structure first: if the active theme is NOT a block theme, do not add the logo step and tell the user in Hebrew that this theme cannot take a logo from here (it has to be set manually under Appearance > Customize > Site Identity); upload the image only if they also want it in the media library. With a block theme the default header usually shows the site logo block; if the user also wants the header redesigned use wp_prepare_header with the header pattern. Never say the logo was set unless the result says \"הלוגו הוגדר\".",
+  "USER FILES: when the app note lists files the user attached for upload (fileId like f3k9x2ab), upload them with wp_prepare_upload_user_file {fileId, fileName, alt} (a plan step before the pages that use them; alt describes an image, may be empty for a video). Then place them with the references {{key.url}} / {{key.id}}: images in image blocks or kit patterns, videos with the video-section pattern (videoUrl, videoId, posterUrl) or a wp:video block whose src is exactly the uploaded file. NEVER use external video URLs, YouTube/Vimeo embeds or iframes; a video src outside this site is rejected. If the user says 'put this video on the home page', add the upload step and then a page update that contains the video-section. If WordPress refuses an upload because of the site's upload size limit, tell the user in Hebrew to reduce the file or ask the host to raise upload_max_filesize / post_max_size.",
   "DESIGN REFERENCES: when the user attaches a reference image, or gives a reference website (read it with wp_read_design_reference, which returns screenshots and extracted colors/fonts as untrusted data), study it and match its look and feel: layout style, section rhythm, spacing, color mood, typography character, button and card style. Express it with OUR OWN CSS and core blocks. NEVER copy logos, brand names, photos, slogans or text from the reference, and never upload the reference image to WordPress unless the user explicitly asks for that separately. Write original Hebrew copy for the user's own business. Summarize in one or two Hebrew sentences which style traits you took from the reference. IMPORTANT: reference images are shown to you only once, so in the SAME response as your first tool call write a concise design brief as text (palette with hex values, fonts, spacing, radius/shadow, section rhythm, mood) and rely on it afterwards.",
   "Keep each page compact (a handful of sections) so a whole multi-page plan stays within the output limit.",
 ].join(" ");
@@ -272,6 +306,7 @@ class Agent {
     this.plans = new BuildPlans(this, argumentsFor);
     this.drafts = new Map();
     this.pendingConfirm = new Map();
+    this.userFiles = new Map();
     this.spent = new Map(); // dollars spent by earlier runs of the same task (kept across "המשך")
     this.capBase = new Map(); // per-task cost cap: 3x the estimate, or $2 without one
     this.confirmed = new Set();
@@ -452,6 +487,62 @@ class Agent {
       )
     );
   }
+  // ---- files the user attached in the chat (bytes stay in main; the renderer only ever holds ids) ----
+  holdFile(project, entry) {
+    const files = this.userFiles.get(project) || new Map();
+    for (const [key, f] of files)
+      if (this.now() - f.at > 2 * 3600 * 1000) files.delete(key);
+    const total = [...files.values()].reduce((n, f) => n + f.bytes.length, 0);
+    if (files.size >= 12 || total + entry.bytes.length > 400 * 1024 * 1024)
+      throw new Error("יותר מדי קבצים מצורפים (עד 12 קבצים ו־400 MB בסך הכול)");
+    files.set(entry.id, { ...entry, at: this.now() });
+    this.userFiles.set(project, files);
+  }
+  heldFile(project, fileId) {
+    return this.userFiles.get(project)?.get(fileId) || null;
+  }
+  dropFile(project, fileId) {
+    this.userFiles.get(project)?.delete(fileId);
+  }
+  dropFiles(project) {
+    this.userFiles.delete(project);
+  }
+  async prepareUserFile(id, fields, signal, fingerprint) {
+    userFileFields(fields);
+    const file = this.heldFile(id, fields.fileId);
+    if (!file)
+      throw new Error(
+        "הקובץ אינו זמין (הוא לא צורף, הוסר או פג); צרפו אותו מחדש",
+      );
+    mediaType(file.bytes, file.mime);
+    const ext = MEDIA_EXT[file.mime];
+    const image = {
+      bytes: file.bytes,
+      mime: file.mime,
+      sha256: createHash("sha256").update(file.bytes).digest("hex"),
+    };
+    const out = await this.prepareImage(
+      id,
+      {
+        url: `https://user-file.invalid/${file.id}.${ext}`,
+        fileName: `${fields.fileName.replace(/\.[^.]*$/, "")}.${ext}`,
+        alt: fields.alt,
+      },
+      signal,
+      fingerprint,
+      image,
+    );
+    const pending = this.pending.get(id);
+    if (pending) pending.userFileId = file.id;
+    return out;
+  }
+  // Video/poster URLs must be files on the connected site (mock host allowed while a plan is only being prepared).
+  checkMedia(id, content, allowMock = false) {
+    if (typeof content === "string" && content.includes("video"))
+      assertSiteMedia(content, new URL(this.wp.status(id).site).origin, {
+        allowMock,
+      });
+  }
   // A graphic captured by the scanner: PNG bytes held by main for this import source (never fetched, never text).
   async prepareGraphic(id, fields, signal, fingerprint) {
     graphicFields(fields);
@@ -486,16 +577,17 @@ class Agent {
     );
   }
   async prepareImage(id, fields, signal, fingerprint, preloaded = null) {
-    imageFields(fields);
+    if (!preloaded) imageFields(fields);
+    else mediaType(preloaded.bytes, preloaded.mime);
     this.secureLog();
     const image =
       preloaded || (await this.wp.downloadImage(fields.url, signal));
     // The extension comes from the real bytes; the model's file name only supplies the base name.
     fields = {
       ...fields,
-      fileName: `${fields.fileName.replace(/\.[^.]*$/, "")}.${IMAGE_TYPES[image.mime]}`,
+      fileName: `${fields.fileName.replace(/\.[^.]*$/, "")}.${MEDIA_EXT[image.mime]}`,
     };
-    imageFields(fields);
+    mediaFields(fields, image.mime);
     signal.throwIfAborted();
     if (fingerprint !== this.fingerprint(id))
       throw new Error("חיבור האתר השתנה; ההעלאה בוטלה");
@@ -515,8 +607,7 @@ class Agent {
         sha256: image.sha256,
       },
       expires: this.now() + 5 * 60 * 1000,
-      warning:
-        "העלאת תמונה לספריית המדיה — הקובץ יהיה נגיש בכתובת ציבורית. ביטול העלאה לאחר ביצוע ימחק את הקובץ לצמיתות, רק באישור נוסף.",
+      warning: `העלאת ${image.mime.startsWith("video/") ? "סרטון" : "תמונה"} לספריית המדיה — הקובץ יהיה נגיש בכתובת ציבורית. ביטול העלאה לאחר ביצוע ימחק את הקובץ לצמיתות, רק באישור נוסף.`,
     };
     const pending = {
       ...preview,
@@ -999,6 +1090,7 @@ class Agent {
           );
       }
       validatePlan({ title: draft.title, steps }, argumentsFor);
+      this.checkMedia(id, step.args?.content, true);
       if (step.tool === "wp_prepare_site_css")
         checkCss(step.args.css, new URL(this.wp.status(id).site).hostname);
     };
@@ -1593,6 +1685,13 @@ class Agent {
                 review: this.review(id),
               };
             }
+            if (call.name === "wp_prepare_upload_user_file")
+              return await this.prepareUserFile(
+                id,
+                call.args,
+                signal,
+                fingerprint,
+              );
             if (call.name === "wp_prepare_upload_scan_graphic")
               return await this.prepareGraphic(
                 id,
@@ -1615,6 +1714,7 @@ class Agent {
             signal.throwIfAborted();
             if (fingerprint !== this.fingerprint(id))
               throw new Error("חיבור האתר השתנה");
+            this.checkMedia(id, call.args.content);
             const payload = {};
             for (const k of ["title", "content"])
               if (call.args[k] !== undefined) payload[k] = call.args[k];
@@ -1740,11 +1840,22 @@ class Agent {
     this.record(p, "executing");
     dispatch();
     if (p.kind === "upload") {
+      let lastPercent = -1;
+      const mb = (n) => (n / 1048576).toFixed(n > 10485760 ? 0 : 1);
       const response = await this.wp.uploadImage(
         id,
         p.image,
         p.payload,
         signal,
+        (sent, total) => {
+          const percent = Math.floor((sent / total) * 100);
+          if (percent === lastPercent) return;
+          lastPercent = percent;
+          this.progress(
+            id,
+            `מעלה את הקובץ לאתר… ${percent}% (${mb(sent)} מתוך ${mb(total)} MB)`,
+          );
+        },
       );
       p.pageId = response.id;
       this.record(p, "executing", { page: response.id });
@@ -1758,15 +1869,27 @@ class Agent {
         actual.status !== "inherit"
       )
         throw new Error("הקריאה החוזרת אינה תואמת לתמונה שאושרה");
-      const originalBytes = await this.wp.downloadImage(
-        actual.original,
-        signal,
-      );
-      if (
-        originalBytes.sha256 !== p.image.sha256 ||
-        originalBytes.mime !== p.image.mime
-      )
-        throw new Error("קובץ התמונה באתר אינו תואם לקובץ שאושר");
+      if (p.image.mime.startsWith("video/")) {
+        // Videos are verified by a streamed hash of the file on the site (never buffered).
+        this.progress(id, "מאמת את הקובץ באתר…");
+        const remote = await this.wp.hashFile(actual.original, signal);
+        if (
+          remote.sha256 !== p.image.sha256 ||
+          remote.length !== p.image.bytes.length
+        )
+          throw new Error("קובץ הסרטון באתר אינו תואם לקובץ שאושר");
+      } else {
+        const originalBytes = await this.wp.downloadImage(
+          actual.original,
+          signal,
+        );
+        if (
+          originalBytes.sha256 !== p.image.sha256 ||
+          originalBytes.mime !== p.image.mime
+        )
+          throw new Error("קובץ התמונה באתר אינו תואם לקובץ שאושר");
+      }
+      if (p.userFileId) this.dropFile(p.project, p.userFileId);
       this.logActivity(id, {
         ...entry,
         pageId: actual.id,
@@ -1776,7 +1899,7 @@ class Agent {
       });
       this.record(p, "verified", { page: actual.id });
       return {
-        text: `WordPress: העלאת התמונה אומתה בקריאה חוזרת, כולל הקובץ והטקסט החלופי. נתוני תמונה לשילוב בטיוטה: ${JSON.stringify({ id: actual.id, url: actual.source, alt: actual.alt })}`,
+        text: `WordPress: העלאת ${p.image.mime.startsWith("video/") ? "הסרטון" : "התמונה"} אומתה בקריאה חוזרת, כולל הקובץ${p.image.mime.startsWith("video/") ? "" : " והטקסט החלופי"}. נתוני קובץ לשילוב בטיוטה: ${JSON.stringify({ id: actual.id, url: actual.source, alt: actual.alt })}`,
         media: actual,
       };
     }
@@ -1816,7 +1939,8 @@ class Agent {
     const signal = AbortSignal.any([
       controller.signal,
       AbortSignal.timeout(
-        ["build-plan", "undo-plan"].includes(p.kind)
+        ["build-plan", "undo-plan"].includes(p.kind) ||
+          p.image?.bytes?.length > 5 * 1024 * 1024
           ? 30 * 60 * 1000
           : p.structure
             ? 180000
@@ -1849,36 +1973,37 @@ class Agent {
       if (this.running.get(id) === controller) this.running.delete(id);
     }
   }
-  // Plain-Hebrew result line and outcome class for the chat; `view` is an operation ID only (main builds the URL).
+  // Plain-Hebrew result lines and outcome class for the chat. `view` is an operation ID only (main builds the URL), and it is
+  // set only when there is something to open (see results.viewTarget).
   outcome(p, result) {
+    const rows = this.records.filter(
+      (r) =>
+        r.project === p.project &&
+        (r.operation === p.token || r.planId === p.token),
+    );
     if (result.plan) {
       const steps = result.plan.steps,
         ok = steps.filter((s) => s.state === "verified").length;
       const unknown = steps.some((s) => s.state === "unknown");
       const done = result.plan.state === "complete";
       const head = p.kind === "undo-plan" ? "ביטול התוכנית" : "התוכנית";
+      const lines = steps.map((s) =>
+        s.state === "verified" || s.state === "restored"
+          ? `✅ ${s.done || s.label}`
+          : s.state === "unknown"
+            ? `⚠️ ${s.label}: התוצאה לא ידועה — בדקו באתר`
+            : s.state === "failed"
+              ? `❌ ${s.label}: לא הושלם`
+              : `• ${s.label}: לא הופעל`,
+      );
+      const buildOk = p.kind === "build-plan" && ok > 0;
       return {
         outcome: done ? "verified" : unknown ? "unknown" : "partial",
-        view: p.kind === "build-plan" && ok ? p.token : undefined,
-        ...(p.kind === "build-plan" && ok
-          ? { undo: p.token, undoPlan: true }
-          : {}),
-        text: `${done ? "✅" : "⚠️"} ${done ? `${head} בוצעה` : `${head} נעצרה`}: ${ok} מתוך ${steps.length} שלבים אומתו${done ? "" : ". בדקו את הפירוט למטה"}\n\n${result.text}`,
+        view: buildOk && viewTarget(rows) ? p.token : undefined,
+        ...(buildOk ? { undo: p.token, undoPlan: true } : {}),
+        text: `${done ? "✅" : "⚠️"} ${done ? `${head} בוצעה` : `${head} נעצרה`}: ${ok} מתוך ${steps.length} שלבים אומתו${done ? "" : ". בדקו את הפירוט למטה"}\n${lines.join("\n")}\n\n${result.text}`,
       };
     }
-    const name = p.payload?.title ?? p.before?.title ?? result.page?.title;
-    const line =
-      p.resource === "media"
-        ? p.kind === "delete-media"
-          ? "✅ התמונה נמחקה — אומת באתר"
-          : "✅ התמונה הועלתה — אומתה באתר"
-        : p.kind === "create"
-          ? `✅ נוצרה טיוטה: '${name}' — אומתה באתר`
-          : p.kind === "update"
-            ? `✅ העמוד עודכן: '${name}' — אומת באתר`
-            : p.kind === "trash"
-              ? `✅ '${name}' הועבר לפח — אומת באתר`
-              : `✅ ${result.text}`;
     // Offer undo only for first-order writes the existing undo flow supports (not for undo/restore results).
     const undoable = [
       "create",
@@ -1895,11 +2020,8 @@ class Agent {
     ].includes(p.kind);
     return {
       outcome: "verified",
-      text: line,
-      view:
-        ["create", "update"].includes(p.kind) && p.resource !== "media"
-          ? p.token
-          : undefined,
+      text: `✅ ${doneText(p, result)} — אומת באתר`,
+      view: viewTarget(rows) ? p.token : undefined,
       ...(undoable ? { undo: p.token } : {}),
     };
   }

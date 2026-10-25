@@ -31,7 +31,8 @@ const PROVIDER_KEY_URLS = Object.freeze({
 const path = require("node:path");
 const fs = require("node:fs");
 const { fitPet } = require("./pet-layout.cjs");
-const { randomUUID: uuid } = require("node:crypto");
+const { randomBytes } = require("node:crypto");
+const { sniffMedia, mediaType, VIDEO_LIMIT } = require("./wordpress.cjs");
 const {
   chatBounds,
   fitChatBounds,
@@ -110,6 +111,7 @@ const { Provider } = require("./provider.cjs");
 const { WordPress } = require("./wordpress.cjs");
 const { Agent } = require("./wp-agent.cjs");
 const { describeError } = require("./errors.cjs");
+const { viewTarget } = require("./results.cjs");
 let agent, activeProject;
 const { atomic } = require("./core.cjs");
 let wordpress,
@@ -422,7 +424,7 @@ if (!app.requestSingleInstanceLock()) {
         sidebar.isVisible() ? sidebar.hide() : showSidebar(),
       );
       handle("state", ["index"], (id) => state(id));
-      handle("openModel", ["index"], showModel);
+      handle("openModel", ["index", "wordpress"], showModel);
       handle("openHistory", ["index"], showHistory);
       handle("historyState", ["history"], () => state());
       handle("closeHistory", ["history"], () => historyWindow.hide());
@@ -499,6 +501,26 @@ if (!app.requestSingleInstanceLock()) {
       });
       handle("closeWordPress", ["wordpress"], closeWordPress);
       // Dedicated tray dialog binds the project in main; never trusts renderer IDs.
+      // Opens <site>/wp-admin/profile.php#application-passwords-section in the default browser.
+      handle("openPasswordPage", ["wordpress"], async ({ site } = {}) => {
+        if (typeof site !== "string") throw new Error("נדרשת כתובת אתר");
+        let href;
+        try {
+          href = await wordpress.adminPasswordsURL(
+            site.trim(),
+            AbortSignal.timeout(10000),
+          );
+        } catch (error) {
+          // Keep siteURL's Hebrew reasons; anything else (DNS, network) gets a generic message.
+          throw new Error(
+            /[֐-׿]/.test(error.message)
+              ? error.message
+              : "לא ניתן לאמת את כתובת האתר (בדקו שהיא נכונה ופומבית).",
+          );
+        }
+        await shell.openExternal(href);
+        return true;
+      });
       handle("testWordPress", ["wordpress"], async (candidate) => {
         const id = activeProject;
         if (inFlight.size) throw new Error("פעולה עדיין מתבצעת");
@@ -705,81 +727,115 @@ if (!app.requestSingleInstanceLock()) {
           throw new Error("עצור והמתן לסיום הפעולה לפני ניתוק");
         return provider.disconnect();
       });
-      // Reference image: main shows the file dialog and reads the file; the renderer only ever sees an opaque id and a small thumbnail.
-      let pendingImage = null;
-      handle("pickImage", ["history"], async () => {
+      // Files from the chat: main shows the dialog, reads the files and checks them by magic bytes; the renderer only ever
+      // sees opaque ids, names, sizes and small thumbnails. The bytes stay in main (agent.holdFile).
+      handle("pickFiles", ["history"], async () => {
         const choice = await dialog.showOpenDialog(historyWindow, {
-          title: "בחירת תמונת השראה",
-          properties: ["openFile"],
+          title: "צירוף תמונות וסרטונים",
+          properties: ["openFile", "multiSelections"],
           filters: [
-            { name: "תמונות", extensions: ["png", "jpg", "jpeg", "webp"] },
+            {
+              name: "תמונות וסרטונים",
+              extensions: ["png", "jpg", "jpeg", "webp", "gif", "mp4", "webm"],
+            },
           ],
         });
-        if (choice.canceled || !choice.filePaths[0]) return { canceled: true };
-        const file = choice.filePaths[0];
-        const stat = await fs.promises.stat(file);
-        if (!stat.isFile()) throw new Error("הקובץ שנבחר אינו תקין");
-        if (stat.size > 5 * 1024 * 1024)
-          throw new Error("התמונה גדולה מדי (המקסימום 5 MB)");
-        const buf = await fs.promises.readFile(file);
-        const mime = buf
-          .subarray(0, 8)
-          .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
-          ? "image/png"
-          : buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff
-            ? "image/jpeg"
-            : buf.subarray(0, 4).toString("latin1") === "RIFF" &&
-                buf.subarray(8, 12).toString("latin1") === "WEBP"
-              ? "image/webp"
-              : null;
-        if (!mime) throw new Error("הקובץ אינו תמונת PNG, JPG או WebP תקינה");
-        // Normalize for providers: long edge <= 1568 px, JPEG ~85 (Anthropic limits size and dimensions; retina PNGs are huge).
-        let data = buf,
-          outMime = mime,
-          thumb = "";
-        const image = nativeImage.createFromBuffer(buf);
-        if (!image.isEmpty()) {
-          const { width, height } = image.getSize();
-          const scale = Math.min(1, 1568 / Math.max(width, height));
-          const fit =
-            scale < 1
-              ? image.resize({
-                  width: Math.max(1, Math.round(width * scale)),
-                  height: Math.max(1, Math.round(height * scale)),
-                  quality: "best",
-                })
-              : image;
-          let quality = 85;
-          data = fit.toJPEG(quality);
-          while (data.length > 3.5 * 1024 * 1024 && quality > 40)
-            data = fit.toJPEG((quality -= 15));
-          outMime = "image/jpeg";
-          const small =
-            fit.getSize().width > 200 ? fit.resize({ width: 200 }) : fit;
-          thumb =
-            "data:image/jpeg;base64," + small.toJPEG(70).toString("base64");
-        } else if (buf.length > 3.5 * 1024 * 1024) {
-          throw new Error(
-            "לא ניתן לעבד את התמונה (פורמט לא נתמך לכיווץ). נסו PNG או JPG.",
-          );
+        if (choice.canceled || !choice.filePaths.length)
+          return { canceled: true, files: [], errors: [] };
+        const files = [],
+          errors = [];
+        for (const file of choice.filePaths.slice(0, 12)) {
+          const name = path.basename(file).slice(0, 80);
+          try {
+            const stat = await fs.promises.stat(file);
+            if (!stat.isFile()) throw new Error("הקובץ שנבחר אינו תקין");
+            if (stat.size > VIDEO_LIMIT)
+              throw new Error(
+                "הקובץ גדול מדי (תמונה עד 10 MB, סרטון עד 200 MB)",
+              );
+            const bytes = await fs.promises.readFile(file);
+            const mime = sniffMedia(bytes); // SVG and everything else is null
+            if (!mime)
+              throw new Error(
+                "סוג הקובץ אינו נתמך (מותר JPG, PNG, WebP, GIF, MP4, WebM; SVG חסום)",
+              );
+            try {
+              mediaType(bytes, mime);
+            } catch {
+              throw new Error(
+                mime.startsWith("video/")
+                  ? "הסרטון גדול מדי או פגום (עד 200 MB)"
+                  : "התמונה גדולה מדי או פגומה (עד 10 MB)",
+              );
+            }
+            const kind = mime.startsWith("video/") ? "video" : "image";
+            let thumb = "",
+              modelImage = null;
+            if (kind === "image") {
+              // Reference copy for the model: long edge <= 1568 px, JPEG ~85. The original bytes stay untouched for uploads.
+              const image = nativeImage.createFromBuffer(bytes);
+              if (!image.isEmpty()) {
+                const { width, height } = image.getSize();
+                const scale = Math.min(1, 1568 / Math.max(width, height));
+                const fit =
+                  scale < 1
+                    ? image.resize({
+                        width: Math.max(1, Math.round(width * scale)),
+                        height: Math.max(1, Math.round(height * scale)),
+                        quality: "best",
+                      })
+                    : image;
+                let quality = 85,
+                  data = fit.toJPEG(quality);
+                while (data.length > 3.5 * 1024 * 1024 && quality > 40)
+                  data = fit.toJPEG((quality -= 15));
+                modelImage = {
+                  mime: "image/jpeg",
+                  data: data.toString("base64"),
+                };
+                const small =
+                  fit.getSize().width > 200 ? fit.resize({ width: 200 }) : fit;
+                thumb =
+                  "data:image/jpeg;base64," +
+                  small.toJPEG(70).toString("base64");
+              } else if (bytes.length <= 3.5 * 1024 * 1024)
+                modelImage = { mime, data: bytes.toString("base64") };
+            }
+            const id = "f" + randomBytes(5).toString("hex");
+            agent.holdFile(activeProject, {
+              id,
+              name,
+              kind,
+              mime,
+              bytes,
+              modelImage,
+              thumb,
+            });
+            files.push({
+              id,
+              name,
+              kind,
+              mime,
+              size: bytes.length,
+              thumb,
+              canInspire: kind === "image" && !!modelImage,
+            });
+          } catch (e) {
+            errors.push(`${name}: ${e.message}`);
+          }
         }
-        pendingImage = {
-          project: activeProject,
-          id: uuid(),
-          mime: outMime,
-          data: data.toString("base64"),
-          thumb,
-        };
-        return {
-          id: pendingImage.id,
-          name: path.basename(file).slice(0, 80),
-          thumb,
-        };
+        return { files, errors };
+      });
+      handle("dropFile", ["history"], ({ id } = {}) => {
+        if (typeof id !== "string" || id.length > 40)
+          throw new Error("מזהה קובץ לא תקין");
+        agent.dropFile(activeProject, id);
+        return true;
       });
       handle(
         "send",
         ["index", "history"],
-        async ({ id, message, contextIds = [], imageId } = {}) => {
+        async ({ id, message, contextIds = [], files = [] } = {}) => {
           text(message, 12000);
           if (!message.trim()) throw new Error("יש להזין הודעה");
           if (isConnectRequest(message)) return { action: "connect" };
@@ -808,18 +864,37 @@ if (!app.requestSingleInstanceLock()) {
           const resuming = message.trim() === "המשך" && agent.hasResume(id);
           if (!resuming) agent.clearResume(id);
           const messages = buildMessages(project, message, agent.context(id));
-          let image = null;
-          if (imageId !== undefined) {
-            if (
-              typeof imageId !== "string" ||
-              !pendingImage ||
-              pendingImage.id !== imageId ||
-              pendingImage.project !== id
-            )
-              throw new Error("התמונה אינה זמינה; צרפו אותה מחדש");
-            image = pendingImage;
-            messages.at(-1).images = [{ mime: image.mime, data: image.data }];
+          // Attached files: "inspire" images go to the model as images (this message only); "upload" files are offered to the
+          // agent by id for wp_prepare_upload_user_file. Videos can only be uploaded.
+          const chosen = [];
+          if (!Array.isArray(files) || files.length > 12)
+            throw new Error("יותר מדי קבצים מצורפים");
+          for (const f of files) {
+            const held =
+              typeof f?.id === "string" ? agent.heldFile(id, f.id) : null;
+            if (!held || !["inspire", "upload"].includes(f.mode))
+              throw new Error("אחד הקבצים אינו זמין; צרפו אותו מחדש");
+            if (f.mode === "inspire" && !held.modelImage)
+              throw new Error(
+                `"${held.name}" אינו יכול לשמש כהשראה (סרטונים ופורמטים שלא ניתן לעבד אפשר רק להעלות)`,
+              );
+            chosen.push({ held, mode: f.mode });
           }
+          const inspire = chosen.filter((c) => c.mode === "inspire");
+          const upload = chosen.filter((c) => c.mode === "upload");
+          if (inspire.length)
+            messages.at(-1).images = inspire.map((c) => c.held.modelImage);
+          if (upload.length) {
+            const size = (n) =>
+              `${(n / 1048576).toFixed(n > 10485760 ? 0 : 1)} MB`;
+            messages.splice(messages.length - 1, 0, {
+              role: "user",
+              content: `[הערת מערכת של האפליקציה — לא מהמשתמש] המשתמש צירף קבצים להעלאה לספריית המדיה של האתר. להעלאה השתמשו ב־wp_prepare_upload_user_file {fileId, fileName, alt} (כשלב בתוכנית או לבד), ואחר כך הפנו אליהם ב־{{key.url}} / {{key.id}}; סרטון מוצג בתבנית video-section. הקבצים: ${upload.map((c) => `${c.held.id} (${c.held.kind === "video" ? "סרטון" : "תמונה"}, ${c.held.name}, ${size(c.held.bytes.length)})`).join("; ")}`,
+            });
+          }
+          const firstThumb =
+            inspire.map((c) => c.held.thumb).find(Boolean) ||
+            upload.map((c) => c.held.thumb).find(Boolean);
           if (context)
             messages.splice(messages.length - 1, 0, {
               role: "user",
@@ -852,9 +927,18 @@ if (!app.requestSingleInstanceLock()) {
               id,
               message,
               result.text,
-              image ? { thumb: image.thumb } : undefined,
+              chosen.length
+                ? {
+                    thumb: firstThumb,
+                    files: chosen.map((c) => ({
+                      name: c.held.name,
+                      kind: c.held.kind,
+                      mode: c.mode,
+                    })),
+                  }
+                : undefined,
             );
-            if (image && pendingImage === image) pendingImage = null;
+            for (const c of inspire) agent.dropFile(id, c.held.id); // inspiration copies are single-use; uploads stay until uploaded
             broadcastState();
             if (
               result.review ||
@@ -899,26 +983,30 @@ if (!app.requestSingleInstanceLock()) {
         const id = activeProject;
         if (typeof operation !== "string" || operation.length > 100)
           throw new Error("פעולה לא תקינה");
-        const rows = agent.records.filter(
-          (r) =>
-            r.project === id &&
-            r.state === "verified" &&
-            Number.isSafeInteger(r.page) &&
-            r.resource !== "media" &&
-            ["create", "update"].includes(r.kind) &&
-            (r.operation === operation || r.planId === operation),
-        );
-        const row = rows[0];
         const site = wordpress.status(id).site;
-        if (!row || !site) throw new Error("לא נמצא עמוד מאומת לצפייה");
-        const url = new URL(site);
-        if (url.protocol !== "https:")
-          throw new Error("כתובת האתר אינה מאובטחת");
-        url.searchParams.set(
-          row.resource === "posts" ? "p" : "page_id",
-          String(row.page),
+        const target = viewTarget(
+          agent.records.filter(
+            (r) =>
+              r.project === id &&
+              (r.operation === operation || r.planId === operation),
+          ),
         );
-        url.searchParams.set("preview", "true");
+        if (!target || !site) throw new Error("אין מה לפתוח עבור הפעולה הזו");
+        const base = new URL(site.endsWith("/") ? site : site + "/");
+        if (base.protocol !== "https:")
+          throw new Error("כתובת האתר אינה מאובטחת");
+        let url;
+        if (target.type === "page") {
+          url = new URL(base.href);
+          url.searchParams.set(
+            target.resource === "posts" ? "p" : "page_id",
+            String(target.id),
+          );
+          url.searchParams.set("preview", "true");
+        } else if (target.type === "media") {
+          url = new URL("wp-admin/upload.php", base);
+          url.searchParams.set("item", String(target.id));
+        } else url = base; // logo, header, footer, menu, site name, CSS: the site's home page
         await shell.openExternal(url.href);
         return true;
       });
