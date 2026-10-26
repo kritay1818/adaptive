@@ -31,6 +31,7 @@
         "chat-export-md",
         "chat-open-model",
         "chat-open-wp",
+        "chat-export-diag",
         "chat-export-txt",
       ].includes(element.id)
     )
@@ -1289,6 +1290,20 @@
       }
     };
   }
+  if ($("chat-export-diag"))
+    $("chat-export-diag").onclick = async () => {
+      $("chat-more").open = false;
+      try {
+        const result = await api.exportDiagnostics();
+        await notify(
+          result.canceled
+            ? "הייצוא בוטל"
+            : "יומן האבחון נשמר. אפשר לשלוח אותו אלינו.",
+        );
+      } catch (e) {
+        await notify(e.message, true);
+      }
+    };
   // Header "⋯" menu (history window only): export the last 20 messages, close.
   for (const [id, format] of [
     ["chat-export-md", "md"],

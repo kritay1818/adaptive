@@ -2,7 +2,7 @@
 const https = require("node:https");
 const net = require("node:net");
 const { randomUUID } = require("node:crypto");
-const { imageURL } = require("./wordpress.cjs");
+const { imageURL, tlsCA } = require("./wordpress.cjs");
 
 // Executed in an isolated world with no preload, Node, or application bridge.
 // Extract data, never source HTML, source scripts, handlers, or instructions.
@@ -578,9 +578,11 @@ function publicGet(wp, value, signal, budget) {
     const target = await wp.publicTarget(url, signal);
     signal.throwIfAborted();
     return new Promise((resolve, reject) => {
+      const ca = tlsCA();
       const req = https.request(
         url,
         {
+          ...(ca ? { ca } : {}),
           method: "GET",
           agent: false,
           signal,

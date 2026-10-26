@@ -645,8 +645,14 @@ test("unknown step stops immediately, blocks only its project and remains unknow
       },
     ],
   });
-  f.state.fail = (call) =>
-    call.resource === "settings" && call.method === "POST";
+  // The write fails AND the read-back shows a state that is neither the approved one nor the old one: truly unknown.
+  f.state.fail = (call) => {
+    if (call.resource === "settings" && call.method === "POST") {
+      f.state.settings.page_on_front = 999;
+      return true;
+    }
+    return false;
+  };
   const result = await f.agent.decide("p", pending.review.token, true);
   assert.deepEqual(
     result.plan.steps.map((s) => s.state),
@@ -957,4 +963,56 @@ test("result cards say what each step did, and the view button matches what exis
   const undo = await f.agent.prepareUndo("p", row.id);
   const undone = await f.agent.decide("p", undo.token, true);
   assert.equal(undone.view, undefined);
+});
+
+test("an ambiguous settings write is read back once: applied -> verified, unchanged -> not applied (never blocked), no second POST", async (t) => {
+  const landed = await fixture(t);
+  const pending = await prepare(landed.agent, "wp_prepare_site_identity", {
+    blogname: "שם חדש",
+  });
+  landed.state.fail = (call) => {
+    if (call.resource === "settings" && call.method === "POST") {
+      landed.state.settings.title = "שם חדש"; // the server applied it, but the response was lost
+      return true;
+    }
+    return false;
+  };
+  const done = await landed.agent.decide("p", pending.review.token, true);
+  assert.equal(done.outcome, "verified");
+  assert.equal(writes(landed).length, 1);
+  assert.equal(landed.agent.isBlocked("p"), false);
+
+  const lost = await fixture(t);
+  const second = await prepare(lost.agent, "wp_prepare_site_identity", {
+    blogname: "שם אחר",
+  });
+  lost.state.fail = (call) =>
+    call.resource === "settings" && call.method === "POST"; // nothing applied
+  const result = await lost.agent.decide("p", second.review.token, true);
+  assert.equal(result.outcome, "denied");
+  assert.match(result.text, /לא הוחל/);
+  assert.equal(writes(lost).length, 1, "never a second POST");
+  assert.equal(lost.agent.isBlocked("p"), false);
+});
+
+test("template parts verify when the site returns CRLF, NFD and a trailing newline", async (t) => {
+  const f = await fixture(t, { block: true, ref: true });
+  const content =
+    "<!-- wp:paragraph --><p>café שלום</p><!-- /wp:paragraph -->\n<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->";
+  const pending = await prepare(f.agent, "wp_prepare_header", { content });
+  const original = f.wp.request;
+  f.wp.request = async (url, options) => {
+    const out = await original(url, options);
+    if (
+      options.method === "POST" &&
+      url.searchParams.get("rest_route")?.startsWith("/wp/v2/template-parts")
+    )
+      f.state.header.content.raw =
+        f.state.header.content.raw.replace(/\n/g, "\r\n").normalize("NFD") +
+        "\r\n";
+    return out;
+  };
+  const done = await f.agent.decide("p", pending.review.token, true);
+  assert.equal(done.outcome, "verified");
+  assert.equal(f.agent.isBlocked("p"), false);
 });

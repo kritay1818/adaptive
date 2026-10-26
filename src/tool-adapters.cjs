@@ -13,7 +13,18 @@ function toolGeneration(a, model, messages, tools) {
       content: m.content || "",
       ...(m.images?.length ? { images: m.images } : {}),
     }));
-  const spec = generation(a, model, plain, false, TOOL_OUTPUT_TOKENS);
+  // OpenAI reasoning models (o3/o4/o1, gpt-5): reasoning tokens count against max_completion_tokens, so leave room, and
+  // use a moderate reasoning effort (the default of "medium", sent explicitly). Non-reasoning models reject this parameter.
+  const reasoning =
+    a.kind === "openai" &&
+    /^(?:o3|o4|o1(?!-mini|-preview)|gpt-5)/i.test(String(model));
+  const spec = generation(
+    a,
+    model,
+    plain,
+    false,
+    reasoning ? TOOL_OUTPUT_TOKENS * 2 : TOOL_OUTPUT_TOKENS,
+  );
   const turns = messages.filter((m) => m.role !== "system");
   if (a.kind === "gemini") {
     spec.body.contents = turns.map((m) =>
@@ -35,6 +46,9 @@ function toolGeneration(a, model, messages, tools) {
             parts: turnContent(a, m),
           },
     );
+    // Let the model call tools right away (no "ANY"/"NONE" forcing).
+    if (tools.length)
+      spec.body.toolConfig = { functionCallingConfig: { mode: "AUTO" } };
     if (tools.length)
       spec.body.tools = [
         {
@@ -102,6 +116,7 @@ function toolGeneration(a, model, messages, tools) {
         input_schema: t.parameters,
       }));
       spec.body.tools[spec.body.tools.length - 1].cache_control = cache;
+      spec.body.tool_choice = { type: "auto" }; // parallel tool use stays enabled (the default)
     }
   } else {
     spec.body.messages = messages.map((m) =>
@@ -113,8 +128,14 @@ function toolGeneration(a, model, messages, tools) {
           }
         : m.native || { role: m.role, content: turnContent(a, m) },
     );
-    if (tools.length)
+    if (tools.length) {
       spec.body.tools = tools.map((t) => ({ type: "function", function: t }));
+      spec.body.tool_choice = "auto";
+      // Parallel calls (up to our 12 per response): OpenAI and Qwen accept the flag; Moonshot's API does not document it.
+      if (a.kind === "openai" || a.kind === "qwen")
+        spec.body.parallel_tool_calls = true;
+      if (reasoning) spec.body.reasoning_effort = "medium";
+    }
   }
   return spec;
 }

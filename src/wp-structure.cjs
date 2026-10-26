@@ -1,15 +1,18 @@
 "use strict";
 const { randomUUID, createHash } = require("node:crypto");
-const { siteURL } = require("./wordpress.cjs");
+const { siteURL, networkFailure } = require("./wordpress.cjs");
+const STRUCTURE_LIMIT = 2 * 1024 * 1024; // global styles / template parts can be large
 const { text } = require("./core.cjs");
+const { normSame, sameText, mismatchDetail } = require("./diff.cjs");
 const { safeTemplateHTML } = require("./wp-content.cjs");
 const digest = (v) =>
   createHash("sha256").update(JSON.stringify(v)).digest("hex");
 const same = (a, b) => digest(a) === digest(b);
 const object = (v) => v && typeof v === "object" && !Array.isArray(v);
 const numericId = (v) => Number.isSafeInteger(v) && v > 0 && v <= 1000000000;
-const fail = (message = "פעולת מבנה אתר אינה מורשית") => {
-  throw new Error(message);
+// detail = specific technical reason (shown under "פרטים טכניים"); never contains credentials.
+const fail = (message = "פעולת מבנה אתר אינה מורשית", detail) => {
+  throw Object.assign(new Error(message), detail ? { detail } : {});
 };
 const SETTINGS = new Set([
   "title",
@@ -413,9 +416,9 @@ class SiteStructure {
       fail();
     if (!this.wp.secure() || !this.wp.data[project])
       fail("אין חיבור מאובטח לאתר");
-    const combined = signal
-      ? AbortSignal.any([signal, AbortSignal.timeout(15000)])
-      : AbortSignal.timeout(15000);
+    // Writes (settings, menus, global styles, template parts, publish) get the long write timeout; reads keep 15 seconds.
+    const deadline = AbortSignal.timeout(method === "GET" ? 15000 : 90000);
+    const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
     try {
       const credential = JSON.parse(
         this.wp.storage.decryptString(
@@ -444,11 +447,12 @@ class SiteStructure {
           ),
         ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
         acceptedStatuses: missing ? [200, 201, 404] : [200, 201],
+        maxBytes: STRUCTURE_LIMIT,
       });
       combined.throwIfAborted();
       if (
         typeof response.body !== "string" ||
-        Buffer.byteLength(response.body) > 262144 ||
+        Buffer.byteLength(response.body) > STRUCTURE_LIMIT ||
         /^(?:text\/html|application\/xhtml)/i.test(response.contentType || "")
       )
         throw Error("response");
@@ -468,12 +472,26 @@ class SiteStructure {
       )
         throw Error("response");
       return data;
-    } catch {
-      fail(
-        method === "GET"
-          ? "קריאת מבנה האתר נכשלה (הרשאות, רשת או REST API לא נתמך)."
-          : "תוצאת שינוי מבנה האתר אינה ידועה; אין ניסיון חוזר אוטומטי.",
-      );
+    } catch (e) {
+      const write = method !== "GET";
+      const error = networkFailure(e, {
+        write,
+        timeoutMs: write ? 90000 : 15000,
+        deadline,
+        signal,
+        limit: STRUCTURE_LIMIT,
+      });
+      if (!error.notApplied)
+        error.message = write
+          ? "תוצאת שינוי מבנה האתר אינה ידועה; אין ניסיון חוזר אוטומטי."
+          : "קריאת מבנה האתר נכשלה (הרשאות, רשת או REST API לא נתמך).";
+      else
+        error.message =
+          error.kind === "cert"
+            ? error.message
+            : "החיבור לאתר נכשל לפני שהבקשה נשלחה, ולכן לא נכתב דבר.";
+      if (write && !error.notApplied) error.ambiguousWrite = true; // the one read-back after an ambiguous write runs in execute()
+      throw error;
     }
   }
   // Reads only the requested keys and ignores every other field of /wp/v2/settings. Only keys we write are strict;
@@ -1132,68 +1150,189 @@ class SiteStructure {
         started = true;
         dispatch();
       }
-      const result = await this.request(
-        id,
-        resource,
-        target,
-        method,
-        payload,
-        {},
-        signal,
-      );
+      let result;
+      try {
+        result = await this.request(
+          id,
+          resource,
+          target,
+          method,
+          payload,
+          {},
+          signal,
+        );
+      } catch (e) {
+        // "Not sent" is only "nothing written" when no earlier write of this operation already landed.
+        if (e.notApplied && entry.progress.length) {
+          Object.assign(e, {
+            notApplied: false,
+            notSent: false,
+            partial: true,
+          });
+          e.message =
+            "הפעולה הושלמה חלקית: כתיבה קודמת נקלטה אך הבאה לא נשלחה. בדקו את המצב באתר.";
+        }
+        throw e;
+      }
       entry.progress.push({ resource, target: target ?? result.id, method });
       agent.logActivity(id, entry);
       return result;
     };
     let actual;
-    if (["header", "footer", "template-restore"].includes(p.kind)) {
-      await write("template-parts", current.id, { content: p.payload.content });
-      const theme = await this.blockTheme(id, signal);
-      actual = await this.part(id, theme, p.area, signal);
-      if (actual.id !== current.id || actual.content !== p.payload.content)
-        fail("התבנית באתר לא אומתה בקריאה חוזרת (ייתכן ש־WordPress שינה אותה)");
-    } else if (p.kind === "site-logo") {
-      const media = await this.wp.mediaItem(id, p.payload.site_logo, signal);
-      if (!media || !String(media.mime).startsWith("image/"))
-        fail("פריט המדיה של הלוגו אינו קיים או אינו תמונה");
-      await write("settings", null, p.payload);
-      actual = await this.settings(id, ["site_logo"], signal);
-      if (!same(actual, p.payload)) fail("לוגו האתר לא אומת בקריאה חוזרת");
-    } else if (["site-css", "css-restore"].includes(p.kind)) {
-      const { css: _old, ...otherBefore } = fullStyles;
-      await write("global-styles", current.id, {
-        styles: { ...fullStyles, css: p.payload.css },
-      });
-      const after = await this.cssSnapshot(id, signal);
-      const { css: _new, ...otherAfter } = after.styles;
-      if (
-        after.snapshot.id !== current.id ||
-        after.snapshot.css !== p.payload.css ||
-        !same(otherAfter, otherBefore)
-      )
-        fail(
-          "ה־CSS באתר לא אומת בקריאה חוזרת (ייתכן ש־WordPress סינן או שינה אותו)",
+    const isCss = ["site-css", "css-restore"].includes(p.kind);
+    const single = [
+      "header",
+      "footer",
+      "template-restore",
+      "site-logo",
+      "site-css",
+      "css-restore",
+      "publish",
+      "unpublish",
+      "front-page",
+      "site-identity",
+      "settings-restore",
+    ].includes(p.kind);
+    // Read-back of the target in its comparable shape (also used for the ONE read-back after an ambiguous write).
+    const readNow = async () => {
+      if (["header", "footer", "template-restore"].includes(p.kind))
+        return this.part(id, await this.blockTheme(id, signal), p.area, signal);
+      if (p.kind === "site-logo")
+        return this.settings(id, ["site_logo"], signal);
+      if (isCss) return this.cssSnapshot(id, signal);
+      if (["publish", "unpublish"].includes(p.kind))
+        return pick(await this.wp.page(id, p.pageId, signal, p.resource), [
+          "title",
+          "content",
+          "status",
+        ]);
+      return this.settings(id, Object.keys(p.payload), signal);
+    };
+    const expected = () =>
+      ["header", "footer", "template-restore"].includes(p.kind)
+        ? { id: current.id, content: p.payload.content }
+        : isCss
+          ? {
+              stylesheet: current.stylesheet,
+              id: current.id,
+              css: p.payload.css,
+            }
+          : ["publish", "unpublish"].includes(p.kind)
+            ? {
+                title: current.title,
+                content: current.content,
+                status: p.payload.status,
+              }
+            : p.payload;
+    const beforeShape = () =>
+      ["publish", "unpublish"].includes(p.kind)
+        ? pick(p.before, ["title", "content", "status"])
+        : p.before;
+    const fields = () => Object.keys(expected());
+    try {
+      if (["header", "footer", "template-restore"].includes(p.kind)) {
+        await write("template-parts", current.id, {
+          content: p.payload.content,
+        });
+        actual = await readNow();
+        if (
+          actual.id !== current.id ||
+          !sameText(actual.content, p.payload.content)
+        )
+          fail(
+            "התבנית באתר לא אומתה בקריאה חוזרת (ייתכן ש־WordPress שינה אותה)",
+            mismatchDetail(expected(), actual, fields()),
+          );
+      } else if (p.kind === "site-logo") {
+        const media = await this.wp.mediaItem(id, p.payload.site_logo, signal);
+        if (!media || !String(media.mime).startsWith("image/"))
+          fail("פריט המדיה של הלוגו אינו קיים או אינו תמונה");
+        await write("settings", null, p.payload);
+        actual = await readNow();
+        if (!normSame(actual, p.payload))
+          fail(
+            "לוגו האתר לא אומת בקריאה חוזרת",
+            mismatchDetail(p.payload, actual, fields()),
+          );
+      } else if (isCss) {
+        const { css: _old, ...otherBefore } = fullStyles;
+        await write("global-styles", current.id, {
+          styles: { ...fullStyles, css: p.payload.css },
+        });
+        const after = await readNow();
+        const { css: _new, ...otherAfter } = after.styles;
+        if (
+          after.snapshot.id !== current.id ||
+          !sameText(after.snapshot.css, p.payload.css) ||
+          !normSame(otherAfter, otherBefore)
+        )
+          fail(
+            "ה־CSS באתר לא אומת בקריאה חוזרת (ייתכן ש־WordPress סינן או שינה אותו)",
+            [
+              mismatchDetail(expected(), after.snapshot, ["id", "css"]),
+              normSame(otherAfter, otherBefore)
+                ? ""
+                : "שדות סגנון אחרים בסגנונות הגלובליים השתנו",
+            ]
+              .filter(Boolean)
+              .join("; "),
+          );
+        actual = after.snapshot;
+      } else if (p.kind === "menu")
+        actual = await this.writeMenu(id, p, signal, write, entry);
+      else if (p.kind === "menu-restore")
+        actual = await this.restoreMenu(id, p, signal, write);
+      else if (["publish", "unpublish"].includes(p.kind)) {
+        await write(p.resource, p.pageId, p.payload);
+        actual = await this.wp.page(id, p.pageId, signal, p.resource);
+        if (!normSame(pick(actual, ["title", "content", "status"]), expected()))
+          fail(
+            "הפרסום או החזרה לטיוטה לא אומתו בדיוק",
+            mismatchDetail(expected(), actual, fields()),
+          );
+      } else {
+        await write("settings", null, p.payload);
+        actual = await readNow();
+        if (!normSame(actual, p.payload))
+          fail(
+            "הגדרות האתר לא אומתו בקריאה חוזרת",
+            mismatchDetail(p.payload, actual, fields()),
+          );
+      }
+    } catch (e) {
+      if (!(single && e.ambiguousWrite)) throw e;
+      // ONE read-back after an ambiguous write (timeout/connection lost after sending): applied, not applied, or unknown. Never a second POST.
+      let seen;
+      try {
+        seen = await readNow();
+      } catch (readError) {
+        throw Object.assign(e, {
+          technical: `כתיבה: ${e.detail || "שגיאה לא מזוהה"}\nקריאה חוזרת נכשלה: ${readError.detail || "שגיאה לא מזוהה"}`,
+        });
+      }
+      const view = isCss ? seen.snapshot : seen;
+      const want = expected();
+      const cssOtherOk =
+        !isCss ||
+        normSame(
+          (({ css, ...rest }) => rest)(seen.styles),
+          (({ css, ...rest }) => rest)(fullStyles),
         );
-      actual = after.snapshot;
-    } else if (p.kind === "menu")
-      actual = await this.writeMenu(id, p, signal, write, entry);
-    else if (p.kind === "menu-restore")
-      actual = await this.restoreMenu(id, p, signal, write);
-    else if (["publish", "unpublish"].includes(p.kind)) {
-      await write(p.resource, p.pageId, p.payload);
-      actual = await this.wp.page(id, p.pageId, signal, p.resource);
-      if (
-        !same(pick(actual, ["title", "content", "status"]), {
-          title: current.title,
-          content: current.content,
-          status: p.payload.status,
-        })
-      )
-        fail("הפרסום או החזרה לטיוטה לא אומתו בדיוק");
-    } else {
-      await write("settings", null, p.payload);
-      actual = await this.settings(id, Object.keys(p.payload), signal);
-      if (!same(actual, p.payload)) fail("הגדרות האתר לא אומתו בקריאה חוזרת");
+      if (cssOtherOk && normSame(view, want)) actual = view;
+      else if (normSame(view, beforeShape()))
+        throw Object.assign(
+          new Error(
+            "השינוי לא הוחל באתר: הכתיבה לא נקלטה והמצב נשאר כפי שהיה. לא נכתב דבר והפרויקט לא נחסם.",
+          ),
+          {
+            notApplied: true,
+            technical: `כתיבה: ${e.detail || "שגיאה לא מזוהה"}\nקריאה חוזרת: המצב זהה למצב שלפני השינוי`,
+          },
+        );
+      else
+        throw Object.assign(e, {
+          technical: `כתיבה: ${e.detail || "שגיאה לא מזוהה"}\nקריאה חוזרת: ${mismatchDetail(want, view, Object.keys(want)) || "המצב שונה גם ממה שאושר וגם מהמצב הקודם"}`,
+        });
     }
     const written = ["publish", "unpublish"].includes(p.kind)
       ? pick(actual, ["title", "content", "status"])

@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld(
     openWordPress: () => call("openWordPress"),
     wordPressState: () => call("wordPressState"),
     testWordPress: (fields) => call("testWordPress", fields),
+    exportDiagnostics: () => call("exportDiagnostics"),
     openPasswordPage: (site) => call("openPasswordPage", { site }),
     closeWordPress: () => call("closeWordPress"),
     onWordPressReset: (callback) => {

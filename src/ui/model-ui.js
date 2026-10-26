@@ -46,10 +46,18 @@
   };
   const renderModels = () => {
     const query = $("model-search").value.toLowerCase();
+    const provider = $("provider").value;
+    const hints = window.adModelHints;
+    // Recommended models first (stable order otherwise), each marked "מומלץ".
+    const shown = models
+      .filter((m) => (m.id + " " + m.label).toLowerCase().includes(query))
+      .map((m) => ({ m, good: !!hints?.recommended(provider, m.id) }))
+      .sort((a, b) => Number(b.good) - Number(a.good));
     $("model").replaceChildren(
-      ...models
-        .filter((m) => (m.id + " " + m.label).toLowerCase().includes(query))
-        .map((m) => new Option(m.label, m.id)),
+      ...shown.map(
+        ({ m, good }) =>
+          new Option(good ? `${m.label} · מומלץ` : m.label, m.id),
+      ),
     );
     $("model").selectedIndex = -1;
     $("connect-model").disabled = true;
@@ -143,7 +151,18 @@
   };
   $("region").onchange = changeProvider;
   $("model-search").oninput = renderModels;
+  const updateModelNote = () => {
+    const note = $("model-note");
+    if (!note || !window.adModelHints) return;
+    note.textContent = window.adModelHints.NOTE;
+    note.classList.toggle(
+      "warn",
+      window.adModelHints.isSmall($("model").value),
+    );
+  };
+  updateModelNote();
   $("model").onchange = () => {
+    updateModelNote();
     $("connect-model").disabled = busy || !token || !$("model").value;
   };
   $("model-form").onsubmit = (e) => e.preventDefault();

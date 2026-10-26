@@ -3,6 +3,7 @@ const fs = require("node:fs"),
   path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { atomic, text } = require("./core.cjs");
+const diag = require("./diag.cjs");
 const {
   adapter,
   catalog,
@@ -188,13 +189,18 @@ class Provider {
         signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
-    } catch {
+    } catch (cause) {
       if (timeout.aborted && !signal?.aborted) throw slow();
+      // fetch hides the reason in error.cause: keep the error CODE (never the message) so a certificate problem is visible.
+      const code = String(cause?.cause?.code || cause?.code || "");
+      const cert = diag.CERT_CODES.has(code);
       throw Object.assign(
         new Error(
-          `לא ניתן להגיע לספק (רשת / הפניה / מגבלת זמן: ${Math.round(timeoutMs / 1000)} שניות).`,
+          cert
+            ? "אימות תעודת האבטחה (TLS) של הספק נכשל. ייתכן שתוכנת אנטי־וירוס או חומת אש מיירטת את חיבור ה־HTTPS."
+            : `לא ניתן להגיע לספק (רשת / הפניה / מגבלת זמן: ${Math.round(timeoutMs / 1000)} שניות).`,
         ),
-        { kind: "network" },
+        { kind: "network", detail: code ? `קוד שגיאה: ${code}` : "" },
       );
     }
     if (!r.ok) {

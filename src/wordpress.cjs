@@ -6,6 +6,7 @@ const dns = require("node:dns").promises;
 const net = require("node:net");
 const { randomUUID, createHash } = require("node:crypto");
 const { atomic, text } = require("./core.cjs");
+const diag = require("./diag.cjs");
 // Conservative IPv4-only transport: deny all IPv6 rather than risk mapped,
 // transition, scoped, or newly reserved IPv6 ranges. No proxy or redirect support.
 function publicAddress(address) {
@@ -71,13 +72,54 @@ function request(
     hashOnly = false,
   },
 ) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve, rejectRaw) => {
+    const started = Date.now();
+    const state = { phase: "connecting" }; // connecting -> sending -> waiting -> reading
+    const route = url.searchParams.get("rest_route") || url.pathname;
+    const sentBytes = Buffer.isBuffer(body)
+      ? body.length
+      : body
+        ? Buffer.byteLength(body)
+        : 0;
+    const reject = (error) => {
+      error.phase ??= state.phase;
+      error.ms = Date.now() - started;
+      error.notSent = error.phase === "connecting"; // nothing reached the server
+      diag.log("net", {
+        method,
+        host: url.host,
+        route,
+        ok: false,
+        phase: error.phase,
+        code: error.code,
+        name: error.name,
+        message: error.message,
+        ms: error.ms,
+        sentBytes,
+      });
+      rejectRaw(error);
+    };
+    const done = (result, received) => {
+      diag.log("net", {
+        method,
+        host: url.host,
+        route,
+        ok: true,
+        status: result.status,
+        ms: Date.now() - started,
+        sentBytes,
+        receivedBytes: received,
+      });
+      resolve(result);
+    };
+    const ca = tlsCA();
     const req = https.request(
       url,
       {
         method,
         agent: false,
         signal,
+        ...(ca ? { ca } : {}),
         headers: {
           ...(authorization ? { Authorization: authorization } : {}),
           Accept: binary
@@ -97,6 +139,7 @@ function request(
         },
       },
       (res) => {
+        state.phase = "reading";
         let length = 0;
         const chunks = [];
         // Node HTTPS never follows Location; do not consume redirect/error payloads.
@@ -104,7 +147,7 @@ function request(
           !acceptedStatuses.includes(res.statusCode) ||
           (res.statusCode >= 300 && res.statusCode < 400)
         ) {
-          resolve({ status: res.statusCode, body: "" });
+          done({ status: res.statusCode, body: "" }, 0);
           res.destroy();
           return;
         }
@@ -120,20 +163,34 @@ function request(
         });
         res.on("error", reject);
         res.on("end", () =>
-          resolve({
-            status: res.statusCode,
-            contentType: res.headers?.["content-type"] || "",
-            ...(hash ? { sha256: hash.digest("hex"), length } : {}),
-            body: hash
-              ? Buffer.alloc(0)
-              : binary
-                ? Buffer.concat(chunks)
-                : Buffer.concat(chunks).toString("utf8"),
-          }),
+          done(
+            {
+              status: res.statusCode,
+              contentType: res.headers?.["content-type"] || "",
+              ...(hash ? { sha256: hash.digest("hex"), length } : {}),
+              body: hash
+                ? Buffer.alloc(0)
+                : binary
+                  ? Buffer.concat(chunks)
+                  : Buffer.concat(chunks).toString("utf8"),
+            },
+            length,
+          ),
         );
       },
     );
     req.on("error", reject);
+    // Phase tracking for diagnostics: DNS/TCP/TLS handshake -> request written -> waiting for headers -> body.
+    req.on("socket", (socket) => {
+      if (socket.connecting)
+        socket.once("secureConnect", () => {
+          if (state.phase === "connecting") state.phase = "sending";
+        });
+      else state.phase = "sending";
+    });
+    req.on("finish", () => {
+      if (state.phase === "sending") state.phase = "waiting";
+    });
     if (onProgress && Buffer.isBuffer(body) && body.length > 1024 * 1024) {
       // Large upload: write in chunks so the UI can show progress.
       let offset = 0;
@@ -151,6 +208,26 @@ function request(
       pump();
     } else req.end(body);
   });
+}
+// Windows: antivirus products that inspect HTTPS install their own root certificate in the Windows store, which Node's bundled
+// CA list does not know. Trust the system store in addition to the bundled roots (same trust as the browser). Windows only.
+let systemRoots;
+function tlsCA() {
+  if (process.platform !== "win32") return undefined;
+  if (systemRoots === undefined) {
+    try {
+      const tls = require("node:tls");
+      systemRoots = tls.getCACertificates
+        ? [
+            ...tls.getCACertificates("bundled"),
+            ...tls.getCACertificates("system"),
+          ]
+        : null;
+    } catch {
+      systemRoots = null;
+    }
+  }
+  return systemRoots || undefined;
 }
 const IMAGE_LIMIT = 10 * 1024 * 1024;
 // Page/post REST responses (context=edit carries raw and rendered content): sized for large designed pages.
@@ -359,6 +436,58 @@ function mediaSummary(m) {
     modified: typeof m.modified === "string" ? m.modified.slice(0, 40) : "",
   };
 }
+// One place that turns any failure of a WordPress request into a Hebrew error with a SPECIFIC technical reason (error.detail):
+// timeout (seconds + phase: connecting / sending / waiting / reading), HTTP status, response too large, invalid JSON,
+// network error code. A certificate error is its own clear message. A request that never left the machine (connection or TLS
+// handshake failed) is "not applied": nothing was written, so it must not be reported as unknown.
+function networkFailure(e, { write, timeoutMs, deadline, signal, limit }) {
+  const m = String(e?.message || "");
+  const c = diag.classifyNetworkError(e, {
+    timeoutMs,
+    deadlineHit: !!deadline?.aborted && !signal?.aborted,
+    userAborted: !!signal?.aborted,
+  });
+  let reason = c.reason;
+  if (/^status:(\d+)$/.test(m)) reason = `האתר החזיר סטטוס HTTP ${m.slice(7)}`;
+  else if (m === "html") reason = "האתר החזיר דף HTML במקום JSON";
+  else if (m === "response")
+    reason = "תשובת האתר אינה תקינה (סטטוס או סוג תוכן לא צפויים)";
+  else if (m === "body") reason = "התשובה ריקה או אינה טקסט";
+  else if (e instanceof SyntaxError) reason = "תשובת האתר אינה JSON תקין";
+  else if (m === "size" || c.kind === "size")
+    reason = `תשובת האתר גדולה מהמגבלה${limit ? ` (${Math.round(limit / 1048576)} MB)` : ""}`;
+  else if (m === "timeout" && !c.phase)
+    reason = "חריגה ממגבלת הזמן בזיהוי כתובת האתר";
+  const notSent =
+    write &&
+    (c.kind === "cert" ||
+      (c.notSent && ["network", "timeout"].includes(c.kind)));
+  const error = new Error(
+    c.kind === "cert"
+      ? diag.CERT_MESSAGE
+      : notSent
+        ? "החיבור לאתר נכשל לפני שהבקשה נשלחה, ולכן לא נכתב דבר."
+        : write
+          ? "תוצאת הכתיבה אינה ידועה. אין ניסיון חוזר אוטומטי; בדקו באתר לפני פעולה נוספת."
+          : c.kind === "timeout" || c.kind === "network"
+            ? "קריאת WordPress נכשלה (רשת, הרשאות, הפניה או תשובה לא תקינה)."
+            : "קריאת WordPress נכשלה (רשת, הרשאות, הפניה או תשובה לא תקינה).",
+  );
+  error.detail = reason;
+  error.kind = c.kind;
+  error.phase = c.phase;
+  error.code = c.code;
+  if (notSent) Object.assign(error, { notApplied: true, notSent: true });
+  diag.log("fail", {
+    write,
+    kind: c.kind,
+    phase: c.phase,
+    code: c.code,
+    reason,
+    notApplied: notSent,
+  });
+  return error;
+}
 class WordPress {
   constructor(dir, storage, deps = {}) {
     this.file = path.join(dir, "wordpress-connections.json");
@@ -566,33 +695,14 @@ class WordPress {
         throw new Error("html");
       return JSON.parse(result.body);
     } catch (e) {
-      // Never reflect server payloads, Authorization or credentials; only a fixed technical reason code is kept.
-      const m = String(e?.message || "");
-      const reason =
-        deadline.aborted && !signal?.aborted
-          ? `חריגה ממגבלת הזמן (${write ? 90 : 15} שניות)`
-          : signal?.aborted
-            ? "הפעולה בוטלה או חרגה ממגבלת הזמן הכוללת"
-            : m === "size" || /size/i.test(m)
-              ? `תשובת האתר גדולה מהמגבלה (${Math.round(PAGE_RESPONSE_LIMIT / 1048576)} MB)`
-              : /^status:(\d+)$/.test(m)
-                ? `האתר החזיר סטטוס HTTP ${m.slice(7)}`
-                : m === "html"
-                  ? "האתר החזיר דף HTML במקום JSON"
-                  : e instanceof SyntaxError
-                    ? "תשובת האתר אינה JSON תקין"
-                    : m === "timeout"
-                      ? "חריגה ממגבלת הזמן בזיהוי כתובת האתר"
-                      : e?.code
-                        ? `שגיאת רשת (${String(e.code).slice(0, 40)})`
-                        : "שגיאת רשת או תשובה לא תקינה";
-      const error = new Error(
-        write
-          ? "תוצאת הכתיבה אינה ידועה. אין ניסיון חוזר אוטומטי; בדקו באתר לפני פעולה נוספת."
-          : "קריאת WordPress נכשלה (רשת, הרשאות, הפניה או תשובה לא תקינה).",
-      );
-      error.detail = reason;
-      throw error;
+      // Never reflect server payloads, Authorization or credentials; only a fixed technical reason is kept.
+      throw networkFailure(e, {
+        write,
+        timeoutMs: write ? 90000 : 15000,
+        deadline,
+        signal,
+        limit: PAGE_RESPONSE_LIMIT,
+      });
     }
   }
   async pages(id, query = {}, signal, resource = "pages") {
@@ -702,7 +812,9 @@ class WordPress {
     )
       throw new Error("פעולת מדיה אינה מורשית");
     // Uploads (up to 200 MB) get a long limit; every other media request keeps 15 seconds.
-    const deadline = AbortSignal.timeout(upload ? 30 * 60 * 1000 : 15000);
+    const deadline = AbortSignal.timeout(
+      upload ? 30 * 60 * 1000 : method === "GET" ? 15000 : 90000,
+    );
     const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
     try {
       const credential = JSON.parse(
@@ -806,11 +918,18 @@ class WordPress {
       return data;
     } catch (e) {
       if (e?.refused) throw e;
-      throw new Error(
-        method === "GET"
-          ? "קריאת המדיה נכשלה; אין אימות לתוצאה."
-          : "תוצאת שינוי המדיה אינה ידועה. אין ניסיון חוזר אוטומטי.",
-      );
+      const error = networkFailure(e, {
+        write: method !== "GET",
+        timeoutMs: upload ? 30 * 60 * 1000 : method === "GET" ? 15000 : 90000,
+        deadline,
+        signal,
+      });
+      if (!error.notApplied)
+        error.message =
+          method === "GET"
+            ? "קריאת המדיה נכשלה; אין אימות לתוצאה."
+            : "תוצאת שינוי המדיה אינה ידועה. אין ניסיון חוזר אוטומטי.";
+      throw error;
     }
   }
   async mediaItem(id, mediaId, signal) {
@@ -1007,4 +1126,6 @@ module.exports = {
   sniffMedia,
   mediaType,
   mediaFields,
+  networkFailure,
+  tlsCA,
 };

@@ -112,6 +112,7 @@ const { WordPress } = require("./wordpress.cjs");
 const { Agent } = require("./wp-agent.cjs");
 const { describeError } = require("./errors.cjs");
 const { viewTarget } = require("./results.cjs");
+const diag = require("./diag.cjs");
 let agent, activeProject;
 const { atomic } = require("./core.cjs");
 let wordpress,
@@ -275,6 +276,28 @@ if (!app.requestSingleInstanceLock()) {
   app
     .whenReady()
     .then(() => {
+      diag.init(app.getPath("userData"));
+      // Windows: antivirus that inspects HTTPS installs its own root in the Windows store. Trust the system store in addition
+      // to the bundled roots for all Node TLS (WordPress and provider calls), like a browser does. Windows only.
+      let systemCA = "n/a";
+      if (process.platform === "win32") {
+        try {
+          const tls = require("node:tls");
+          if (tls.setDefaultCACertificates && tls.getCACertificates) {
+            tls.setDefaultCACertificates([
+              ...tls.getCACertificates("bundled"),
+              ...tls.getCACertificates("system"),
+            ]);
+            systemCA = "default store extended";
+          } else
+            systemCA = tls.getCACertificates
+              ? "per-request (WordPress)"
+              : "unavailable";
+        } catch (error) {
+          systemCA = "failed: " + error.message;
+        }
+        diag.log("tls", { systemCA });
+      }
       store = new Store(app.getPath("userData"));
       provider = new Provider(app.getPath("userData"), safeStorage);
       wordpress = new WordPress(app.getPath("userData"), safeStorage);
@@ -502,6 +525,32 @@ if (!app.requestSingleInstanceLock()) {
       handle("closeWordPress", ["wordpress"], closeWordPress);
       // Dedicated tray dialog binds the project in main; never trusts renderer IDs.
       // Opens <site>/wp-admin/profile.php#application-passwords-section in the default browser.
+      // Redacted diagnostic log (last 200 network/verify events) saved as a .txt file the user can send to support.
+      handle("exportDiagnostics", ["index", "history"], async () => {
+        const choice = await dialog.showSaveDialog(
+          historyWindow?.isVisible() ? historyWindow : sidebar,
+          {
+            title: "ייצוא יומן אבחון",
+            defaultPath: "ADActive-diagnostics.txt",
+            filters: [{ name: "Text", extensions: ["txt"] }],
+          },
+        );
+        if (choice.canceled || !choice.filePath) return { canceled: true };
+        const meta = {
+          app: app.getVersion(),
+          electron: process.versions.electron,
+          node: process.versions.node,
+          platform: `${process.platform} ${require("node:os").release()} ${process.arch}`,
+          packaged: app.isPackaged,
+          site: wordpress.status(activeProject).site || "(לא מחובר)",
+        };
+        await fs.promises.writeFile(
+          choice.filePath,
+          diag.exportText(meta),
+          "utf8",
+        );
+        return { saved: true };
+      });
       handle("openPasswordPage", ["wordpress"], async ({ site } = {}) => {
         if (typeof site !== "string") throw new Error("נדרשת כתובת אתר");
         let href;
