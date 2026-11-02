@@ -159,9 +159,7 @@ for (const name of ["anthropic", "openai", "gemini"])
     const declared =
       name === "gemini"
         ? spec.body.tools[0].functionDeclarations
-        : name === "anthropic"
-          ? spec.body.tools
-          : spec.body.tools.map((t) => t.function);
+        : spec.body.tools; // anthropic and OpenAI Responses: flat tool objects
     assert.equal(declared.length, tools.length);
     const text = JSON.stringify(declared);
     if (name === "gemini")
@@ -194,22 +192,14 @@ for (const name of ["anthropic", "openai", "gemini"])
                 ],
               }
             : {
-                choices: [
+                status: "completed",
+                output: [
                   {
-                    message: {
-                      role: "assistant",
-                      tool_calls: [
-                        {
-                          id: `c${index}`,
-                          type: "function",
-                          function: {
-                            name: tool,
-                            arguments: JSON.stringify(args),
-                          },
-                        },
-                      ],
-                    },
-                    finish_reason: "tool_calls",
+                    type: "function_call",
+                    id: `fc${index}`,
+                    call_id: `c${index}`,
+                    name: tool,
+                    arguments: JSON.stringify(args),
                   },
                 ],
               };
@@ -248,17 +238,13 @@ test("a bad tool batch is reported with its reason instead of throwing", () => {
   assert.equal(dup.invalid.fatal, true);
   const o = adapter("openai", "");
   const broken = toolOutput(o, {
-    choices: [
+    status: "completed",
+    output: [
       {
-        message: {
-          tool_calls: [
-            {
-              id: "a",
-              function: { name: "wp_plan_start", arguments: "{not json" },
-            },
-          ],
-        },
-        finish_reason: "tool_calls",
+        type: "function_call",
+        call_id: "a",
+        name: "wp_plan_start",
+        arguments: "{not json",
       },
     ],
   });

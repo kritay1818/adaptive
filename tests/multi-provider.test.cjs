@@ -28,7 +28,16 @@ test("MOCK discovery stages credential in main, no inference until explicit cons
       json: async () =>
         opts.method === "GET"
           ? { data: [{ id: "gpt-4.1-mini" }] }
-          : { choices: [{ message: { content: "OK" } }] },
+          : {
+              choices: [{ message: { content: "OK" } }],
+              output: [
+                {
+                  type: "message",
+                  role: "assistant",
+                  content: [{ type: "output_text", text: "OK" }],
+                },
+              ],
+            },
     };
   });
   const list = await p.discover({
@@ -100,7 +109,16 @@ for (const [provider, region, model, list, response, host] of [
     "",
     "kimi-test",
     { data: [{ id: "kimi-test" }] },
-    { choices: [{ message: { content: "OK" } }] },
+    {
+      choices: [{ message: { content: "OK" } }],
+      output: [
+        {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "OK" }],
+        },
+      ],
+    },
     "api.moonshot.ai",
   ],
   [
@@ -124,7 +142,16 @@ for (const [provider, region, model, list, response, host] of [
         ],
       },
     },
-    { choices: [{ message: { content: "OK" } }] },
+    {
+      choices: [{ message: { content: "OK" } }],
+      output: [
+        {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "OK" }],
+        },
+      ],
+    },
     "dashscope-intl.aliyuncs.com",
   ],
 ])
@@ -197,7 +224,16 @@ test("MOCK independent ciphertext, restart, migration, replacement failure, expl
     json: async () =>
       o.method === "GET"
         ? { data: [{ id: "model" }, { id: "other" }] }
-        : { choices: [{ message: { content: "OK" } }] },
+        : {
+            choices: [{ message: { content: "OK" } }],
+            output: [
+              {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "OK" }],
+              },
+            ],
+          },
   }));
   const legacy = {
     model: "legacy-model",
@@ -319,7 +355,16 @@ test("MOCK credential isolation, invalid inputs, redirect rejection and unavaila
       json: async () =>
         o.method === "GET"
           ? { data: [{ id: "model" }] }
-          : { choices: [{ message: { content: "OK" } }] },
+          : {
+              choices: [{ message: { content: "OK" } }],
+              output: [
+                {
+                  type: "message",
+                  role: "assistant",
+                  content: [{ type: "output_text", text: "OK" }],
+                },
+              ],
+            },
     };
   });
   await assert.rejects(
@@ -444,7 +489,16 @@ test("MOCK encryption/storage failure preserves old selection and never exposes 
     json: async () =>
       o.method === "GET"
         ? { data: [{ id: "one" }, { id: "two" }] }
-        : { choices: [{ message: { content: "OK" } }] },
+        : {
+            choices: [{ message: { content: "OK" } }],
+            output: [
+              {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "OK" }],
+              },
+            ],
+          },
   }));
   let d = await p.discover({ key: "public-first-key" });
   await p.connect({ token: d.token, model: "one", consent: true });

@@ -141,3 +141,28 @@ button:disabled {
 #model-note.warn {
   color: var(--ad-warn);
 }
+#tech {
+  margin: 4px 0 8px;
+  color: var(--ad-muted, inherit);
+}
+#tech-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 140px;
+  overflow: auto;
+  font-size: 12px;
+}
+.show-all {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--ad-muted);
+  cursor: pointer;
+}
+.show-all input {
+  width: auto;
+  margin: 0;
+  padding: 0;
+}

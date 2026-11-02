@@ -64,6 +64,10 @@
             autocomplete="off"
             placeholder="שם מודל…"
           />
+          <label class="show-all" for="show-all-models"
+            ><input id="show-all-models" type="checkbox" /> הצגת כל
+            המודלים</label
+          >
           <label for="model">מודל</label
           ><select id="model" size="4" aria-describedby="result"></select>
         </div>
@@ -72,6 +76,10 @@
           רשימת המודלים תיטען אוטומטית לאחר הזנת מפתח. אין יצירת תשובה בזמן
           הטעינה.
         </p>
+        <details id="tech" hidden>
+          <summary>פרטים טכניים</summary>
+          <pre id="tech-body" dir="ltr"></pre>
+        </details>
         <p id="cost">
           רק לחיצה על ״חיבור מודל״ מאשרת בדיקת AI קצרה, שעשויה לחייב את חשבון
           ה־API.

@@ -48,15 +48,25 @@
     const query = $("model-search").value.toLowerCase();
     const provider = $("provider").value;
     const hints = window.adModelHints;
-    // Recommended models first (stable order otherwise), each marked "מומלץ".
-    const shown = models
-      .filter((m) => (m.id + " " + m.label).toLowerCase().includes(query))
-      .map((m) => ({ m, good: !!hints?.recommended(provider, m.id) }))
-      .sort((a, b) => Number(b.good) - Number(a.good));
+    // Only models that can chat and use tools, newest first, the recommended ones on top (rules live in model-hints.js);
+    // "הצגת כל המודלים" shows everything the provider returned.
+    const prepared = hints
+      ? hints.prepareModels(provider, models, {
+          showAll: $("show-all-models").checked,
+        })
+      : {
+          items: models.map((m) => ({ ...m, recommended: false })),
+          hiddenCount: 0,
+        };
+    $("show-all-models").title = prepared.hiddenCount
+      ? `${prepared.hiddenCount} מודלים מוסתרים (קול, תמונה, הטמעות, ישנים ועוד)`
+      : "";
+    const shown = prepared.items.filter((m) =>
+      (m.id + " " + m.label).toLowerCase().includes(query),
+    );
     $("model").replaceChildren(
       ...shown.map(
-        ({ m, good }) =>
-          new Option(good ? `${m.label} · מומלץ` : m.label, m.id),
+        (m) => new Option(m.recommended ? `${m.label} · מומלץ` : m.label, m.id),
       ),
     );
     $("model").selectedIndex = -1;
@@ -82,6 +92,7 @@
       attempt = epoch;
     $("api-key").value = "";
     $("model-search").value = "";
+    $("show-all-models").checked = false;
     $("result").textContent =
       "הזינו מפתח חדש — הרשימה תיטען אוטומטית, ללא בדיקת AI.";
     if (!api) return;
@@ -104,6 +115,19 @@
       $("result").textContent = "לא ניתן לקרוא את מצב החיבור.";
     }
   };
+  // Errors from main may carry the provider's own message after "--TECH--": the headline stays in the result line, the rest
+  // goes under "פרטים טכניים".
+  const show = (text, tech = "") => {
+    $("result").textContent = text;
+    $("tech-body").textContent = tech;
+    $("tech").hidden = !tech;
+  };
+  const showError = (error, suffix = "") => {
+    const [headline, ...tech] = String(error?.message || "").split(
+      "\n--TECH--\n",
+    );
+    show(headline + suffix, tech.join("\n"));
+  };
   const discover = async (attempt, cancellation) => {
     await cancellation;
     if (attempt !== epoch || busy || !$("api-key").value.trim()) return;
@@ -114,6 +138,7 @@
     };
     $("api-key").value = "";
     $("picker").setAttribute("aria-busy", "true");
+    show("");
     $("result").textContent = "טוען רשימת מודלים מהספק… ללא בדיקת AI.";
     try {
       const result = await api.discoverModels(candidate);
@@ -125,8 +150,7 @@
         "בחרו מודל מהרשימה. החיבור יאומת רק בלחיצה על חיבור מודל.";
     } catch (error) {
       if (attempt === epoch)
-        $("result").textContent =
-          error.message + " הזינו מחדש את המפתח כדי לנסות שוב.";
+        showError(error, " הזינו מחדש את המפתח כדי לנסות שוב.");
     } finally {
       candidate.key = "";
       if (attempt === epoch) $("picker").setAttribute("aria-busy", "false");
@@ -151,6 +175,7 @@
   };
   $("region").onchange = changeProvider;
   $("model-search").oninput = renderModels;
+  $("show-all-models").onchange = renderModels;
   const updateModelNote = () => {
     const note = $("model-note");
     if (!note || !window.adModelHints) return;
@@ -202,7 +227,7 @@
       "open-key-page",
     ])
       $(id).disabled = true;
-    $("result").textContent = "בודק חיבור למודל…";
+    show("בודק חיבור למודל…");
     try {
       const state = await api.connect({
         token,
@@ -215,7 +240,7 @@
         $("active").textContent = "המפתח נשמר מוצפן במחשב.";
       }
     } catch (error) {
-      if (attempt === epoch) $("result").textContent = error.message;
+      if (attempt === epoch) showError(error);
     } finally {
       busy = false;
       $("api-key").value = "";

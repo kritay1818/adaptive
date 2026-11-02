@@ -30,7 +30,16 @@ test("closing candidate during validation prevents late commit and preserves exi
       });
     return {
       ok: true,
-      json: async () => ({ choices: [{ message: { content: "OK" } }] }),
+      json: async () => ({
+        choices: [{ message: { content: "OK" } }],
+        output: [
+          {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "OK" }],
+          },
+        ],
+      }),
     };
   });
   const first = await p.discover({ key: "public-original-fixture" });

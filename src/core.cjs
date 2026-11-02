@@ -97,8 +97,8 @@ class Store {
                   (f) =>
                     f &&
                     typeof f.name === "string" &&
-                    ["image", "video"].includes(f.kind) &&
-                    ["inspire", "upload"].includes(f.mode),
+                    ["image", "video", "document"].includes(f.kind) &&
+                    ["inspire", "upload", "document"].includes(f.mode),
                 )
                 .map((f) => ({
                   name: f.name.slice(0, 80),

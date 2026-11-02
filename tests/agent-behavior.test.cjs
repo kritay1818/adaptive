@@ -57,9 +57,9 @@ test("every provider's request includes the tools with automatic tool choice", (
   assert.equal(openai.tool_choice, "auto");
   assert.equal(openai.parallel_tool_calls, true);
   assert.equal(
-    "reasoning_effort" in openai,
+    "reasoning" in openai,
     false,
-    "non-reasoning models do not get reasoning_effort",
+    "non-reasoning models do not get a reasoning setting",
   );
 
   const anthropic = requestFor("anthropic", "claude-sonnet-5-5");
@@ -88,16 +88,13 @@ test("OpenAI reasoning models get a sensible effort and room for reasoning token
   const plain = requestFor("openai", "gpt-4.1");
   for (const model of ["gpt-5", "gpt-5-mini", "o3", "o4-mini"]) {
     const body = requestFor("openai", model);
-    assert.equal(body.reasoning_effort, "medium", model);
-    assert.ok(body.max_completion_tokens > plain.max_completion_tokens, model);
+    assert.deepEqual(body.reasoning, { effort: "medium" }, model);
+    assert.deepEqual(body.include, ["reasoning.encrypted_content"], model);
+    assert.ok(body.max_output_tokens > plain.max_output_tokens, model);
     assert.equal(body.tool_choice, "auto");
   }
   for (const model of ["gpt-4o", "gpt-4.1-mini", "o1-mini"])
-    assert.equal(
-      "reasoning_effort" in requestFor("openai", model),
-      false,
-      model,
-    );
+    assert.equal("reasoning" in requestFor("openai", model), false, model);
 });
 
 test("without tools no tool settings are sent", () => {
@@ -111,31 +108,7 @@ test("without tools no tool settings are sent", () => {
   assert.equal("parallel_tool_calls" in body, false);
 });
 
-test("model window hints: recommended models per provider, and a note about small ones", () => {
-  const yes = [
-    ["anthropic", "claude-sonnet-5-5"],
-    ["anthropic", "claude-opus-5-5"],
-    ["openai", "gpt-5"],
-    ["openai", "gpt-4.1"],
-    ["openai", "gpt-4o"],
-    ["gemini", "gemini-2.5-pro"],
-    ["gemini", "gemini-2.5-flash"],
-    ["moonshot", "kimi-k2-0905-preview"],
-    ["qwen", "qwen-plus"],
-    ["qwen", "qwen3-max"],
-  ];
-  const no = [
-    ["anthropic", "claude-haiku-5-5"],
-    ["openai", "gpt-5-mini"],
-    ["openai", "gpt-5-nano"],
-    ["openai", "gpt-4o-mini"],
-    ["openai", "gpt-4.1-nano"],
-    ["gemini", "gemini-2.5-flash-lite"],
-    ["qwen", "qwen-turbo"],
-    ["moonshot", "moonshot-v1-8k"],
-  ];
-  for (const [p, m] of yes) assert.equal(hints.recommended(p, m), true, m);
-  for (const [p, m] of no) assert.equal(hints.recommended(p, m), false, m);
+test("model window hints: the note about small models and the size check", () => {
   for (const m of [
     "gpt-5-mini",
     "gpt-4.1-nano",
@@ -145,7 +118,8 @@ test("model window hints: recommended models per provider, and a note about smal
     assert.equal(hints.isSmall(m), true, m);
   for (const m of ["gpt-5", "claude-sonnet-5-5", "gemini-2.5-pro"])
     assert.equal(hints.isSmall(m), false, m);
-  assert.match(hints.NOTE, /mini/);
-  assert.match(hints.NOTE, /nano/);
-  assert.match(hints.NOTE, /flash-lite/);
+  assert.equal(
+    hints.NOTE,
+    "מודלים קטנים (mini/nano/flash-lite) זולים יותר אבל פחות טובים בבניית אתרים",
+  );
 });

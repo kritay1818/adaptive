@@ -6,7 +6,7 @@ All authenticated traffic runs in Electron **main**, not the renderer. The five 
 
 | Provider | Discovery (GET) | Inference (POST) | Authentication |
 |---|---|---|---|
-| OpenAI | `https://api.openai.com/v1/models` | `https://api.openai.com/v1/chat/completions` | `Authorization: Bearer …` |
+| OpenAI | `https://api.openai.com/v1/models` | `https://api.openai.com/v1/responses` | `Authorization: Bearer …` |
 | Claude / Anthropic | `https://api.anthropic.com/v1/models` | `https://api.anthropic.com/v1/messages` | `x-api-key`, `anthropic-version: 2023-06-01` |
 | Gemini / Google AI Studio | `https://generativelanguage.googleapis.com/v1beta/models` | `https://generativelanguage.googleapis.com/v1beta/models/{encodedModelId}:generateContent` | `x-goog-api-key` header, never URL query |
 | Kimi / Moonshot international | `https://api.moonshot.ai/v1/models` | `https://api.moonshot.ai/v1/chat/completions` | `Authorization: Bearer …` |
@@ -36,7 +36,8 @@ Keys and the active model are deliberately **app-wide**, as the old OpenAI conne
 
 ## Protocol and storage details
 
-- OpenAI sends `store:false`, `max_completion_tokens`, `model`, `messages`.
+- OpenAI uses the Responses API: `model`, `instructions`, `input` items, `max_output_tokens`, `store:false`; with tools also flat `tools` (`strict:false`), `tool_choice`, `parallel_tool_calls` and, for reasoning models, `reasoning.effort` plus `include: ["reasoning.encrypted_content"]`. Moonshot and Qwen stay on chat completions.
+- A 400 that says a tuning parameter is unsupported (reasoning effort, parallel_tool_calls, temperature, token parameters, include, tool_choice) or a token limit is too high is retried with the parameter dropped or the value the error suggests; the correction is remembered per model for the session. Tools, model and input are never adjusted.
 - Anthropic extracts system messages into top-level `system`, sends user/assistant messages plus `max_tokens`, and reads only text blocks.
 - Gemini maps assistant to `model`, text to `parts`, system to `systemInstruction`, sends `generationConfig.maxOutputTokens`, and reads non-thought text parts only.
 - Moonshot and Qwen use documented Chat Completions compatibility and `max_tokens`. Kimi's current docs mark `max_tokens` deprecated in favor of `max_completion_tokens`; the compatible parameter remains documented and is used here for compatibility across discovered generations.
@@ -60,7 +61,7 @@ No Windows build was produced for this change. Existing `dist/` binaries are sta
 ## Official sources inspected
 
 - OpenAI list: https://developers.openai.com/api/reference/resources/models/methods/list
-- OpenAI Chat Completions: https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create
+- OpenAI Responses: https://developers.openai.com/api/reference/resources/responses/methods/create
 - Anthropic list/auth/pagination: https://platform.claude.com/docs/en/api/models/list
 - Anthropic Messages: https://platform.claude.com/docs/en/api/messages/create
 - Gemini model listing/pagination/capabilities: https://ai.google.dev/api/models

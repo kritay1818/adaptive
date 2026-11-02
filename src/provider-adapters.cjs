@@ -73,6 +73,15 @@ function turnContent(a, m) {
       })),
       { type: "text", text: m.content },
     ];
+  // OpenAI Responses API content parts.
+  if (a.kind === "openai")
+    return [
+      { type: "input_text", text: m.content },
+      ...images.map((i) => ({
+        type: "input_image",
+        image_url: `data:${i.mime};base64,${i.data}`,
+      })),
+    ];
   return [
     { type: "text", text: m.content },
     ...images.map((i) => ({
@@ -81,6 +90,9 @@ function turnContent(a, m) {
     })),
   ];
 }
+// OpenAI models that reason (and therefore take a reasoning effort and need room for reasoning tokens).
+const isReasoning = (model) =>
+  /^(?:o3|o4|o1(?!-mini|-preview)|gpt-5(?!-chat))/i.test(String(model));
 function generation(a, model, messages, validation, limit = 4096) {
   const max = validation ? 128 : limit;
   const system = messages
@@ -119,6 +131,21 @@ function generation(a, model, messages, validation, limit = 4096) {
         generationConfig: { maxOutputTokens: max },
       },
     };
+  // OpenAI: Responses API (/v1/responses), the recommended endpoint for tools with reasoning models.
+  if (a.kind === "openai")
+    return {
+      url: a.base + "/responses",
+      body: {
+        model,
+        ...(system ? { instructions: system } : {}),
+        input: turns.map((m) => ({
+          role: m.role,
+          content: turnContent(a, m),
+        })),
+        max_output_tokens: max,
+        store: false,
+      },
+    };
   return {
     url: a.base + "/chat/completions",
     body: {
@@ -127,9 +154,7 @@ function generation(a, model, messages, validation, limit = 4096) {
         ...(system ? [{ role: "system", content: system }] : []),
         ...turns.map((m) => ({ role: m.role, content: turnContent(a, m) })),
       ],
-      ...(a.kind === "openai"
-        ? { store: false, max_completion_tokens: max }
-        : { max_tokens: max }),
+      max_tokens: max,
     },
   };
 }
@@ -144,7 +169,22 @@ function output(a, r) {
       ?.filter((p) => !p.thought && typeof p.text === "string")
       .map((p) => p.text)
       .join("");
+  if (a.kind === "openai") return responseText(r);
   return r?.choices?.[0]?.message?.content;
+}
+// Responses API output: message items with output_text (or refusal) parts. Reasoning and function_call items carry no text.
+function responseText(r) {
+  if (!Array.isArray(r?.output)) return undefined;
+  return r.output
+    .filter((i) => i?.type === "message")
+    .flatMap((i) => (Array.isArray(i.content) ? i.content : []))
+    .filter(
+      (p) =>
+        (p.type === "output_text" || p.type === "refusal") &&
+        typeof (p.text ?? p.refusal) === "string",
+    )
+    .map((p) => p.text ?? p.refusal)
+    .join("");
 }
 function listing(a, cursor) {
   const url = new URL((a.listBase || a.base) + "/models");
@@ -220,4 +260,6 @@ module.exports = {
   listing,
   listed,
   turnContent,
+  isReasoning,
+  responseText,
 };

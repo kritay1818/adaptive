@@ -67,5 +67,8 @@
     "portable": {
       "artifactName": "ADActive-${version}-portable.${ext}"
     }
+  },
+  "dependencies": {
+    "unpdf": "^2.1.0"
   }
 }

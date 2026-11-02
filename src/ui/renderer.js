@@ -335,6 +335,12 @@
         ),
       };
     }
+    // Infrastructure writes (terms, custom post type items, plugins) bring their own plain-Hebrew summary line from main.
+    if (review.summary)
+      return {
+        lines: [String(review.summary), `אתר: ${review.site}`],
+        steps: [],
+      };
     const title = review.payload?.title ?? review.before?.title;
     const what =
       review.kind === "create"
@@ -598,7 +604,8 @@
       } else {
         const icon = document.createElement("span");
         icon.className = "file-icon";
-        icon.textContent = file.kind === "video" ? "🎬" : "🖼";
+        icon.textContent =
+          file.kind === "video" ? "🎬" : file.kind === "document" ? "📄" : "🖼";
         chip.append(icon);
       }
       const info = document.createElement("span");
@@ -607,26 +614,33 @@
       info.textContent = `${file.name} · ${sizeText(file.size)}`;
       const modes = document.createElement("span");
       modes.className = "file-modes";
-      for (const [mode, label] of [
-        ["inspire", "כהשראה בלבד"],
-        ["upload", "להעלות לאתר"],
-      ]) {
-        const b = document.createElement("button");
-        b.type = "button";
-        b.textContent = label;
-        b.className = file.mode === mode ? "on" : "";
-        b.disabled = mode === "inspire" && !file.canInspire;
-        b.title = b.disabled
-          ? "סרטונים ופורמטים שלא ניתן לעבד אפשר רק להעלות לאתר"
-          : "";
-        b.setAttribute("aria-pressed", String(file.mode === mode));
-        b.onclick = () => {
-          if (busy) return;
-          file.mode = mode;
-          paintChip();
-        };
-        modes.append(b);
-      }
+      if (file.kind === "document") {
+        // Documents are always handed to the model as untrusted content; no choice to make.
+        const note = document.createElement("span");
+        note.className = "hint";
+        note.textContent = `תוכן המסמך יימסר למודל${file.images ? ` · ${file.images} תמונות מהמסמך זמינות להעלאה` : ""}`;
+        modes.append(note);
+      } else
+        for (const [mode, label] of [
+          ["inspire", "כהשראה בלבד"],
+          ["upload", "להעלות לאתר"],
+        ]) {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.textContent = label;
+          b.className = file.mode === mode ? "on" : "";
+          b.disabled = mode === "inspire" && !file.canInspire;
+          b.title = b.disabled
+            ? "סרטונים ופורמטים שלא ניתן לעבד אפשר רק להעלות לאתר"
+            : "";
+          b.setAttribute("aria-pressed", String(file.mode === mode));
+          b.onclick = () => {
+            if (busy) return;
+            file.mode = mode;
+            paintChip();
+          };
+          modes.append(b);
+        }
       const x = document.createElement("button");
       x.type = "button";
       x.className = "file-remove";
@@ -659,7 +673,12 @@
           ...attachedFiles,
           ...picked.files.map((f) => ({
             ...f,
-            mode: f.kind === "video" || !f.canInspire ? "upload" : "inspire",
+            mode:
+              f.kind === "document"
+                ? "document"
+                : f.kind === "video" || !f.canInspire
+                  ? "upload"
+                  : "inspire",
           })),
         ].slice(0, 12);
         paintChip();
@@ -1036,7 +1055,7 @@
         list.textContent = m.files
           .map(
             (f) =>
-              `${f.kind === "video" ? "🎬" : "🖼"} ${f.name} — ${f.mode === "upload" ? "להעלאה לאתר" : "כהשראה"}`,
+              `${f.kind === "video" ? "🎬" : f.kind === "document" ? "📄" : "🖼"} ${f.name} — ${f.mode === "upload" ? "להעלאה לאתר" : f.mode === "document" ? "תוכן מסמך" : "כהשראה"}`,
           )
           .join("\n");
         article.append(list);
@@ -1142,7 +1161,7 @@
     if ($("attach-image")) {
       $("attach-image").disabled = !state.connection.connected;
       $("attach-image").title = state.connection.connected
-        ? "צירוף תמונות וסרטונים (תמונה עד 10 MB, סרטון עד 200 MB)"
+        ? "צירוף תמונות, סרטונים ומסמכים (תמונה עד 10 MB, סרטון עד 200 MB, מסמך עד 20 MB)"
         : "חברו מודל כדי לצרף קבצים";
     }
     $("composer").placeholder = state.connection.connected
@@ -1206,7 +1225,9 @@
     if (!message.trim() && history && attachedFiles.length)
       message = attachedFiles.some((f) => f.mode === "inspire")
         ? "ראו את תמונת ההשראה המצורפת ועצבו בהתאם"
-        : "העלו את הקבצים שצירפתי לספריית המדיה של האתר";
+        : attachedFiles.every((f) => f.mode === "document")
+          ? "השתמשו בתוכן המסמך שצירפתי"
+          : "העלו את הקבצים שצירפתי לספריית המדיה של האתר";
     if (!message.trim()) return;
     if (!api) {
       notify("תצוגה מקדימה בלבד — אין בקשת AI.");

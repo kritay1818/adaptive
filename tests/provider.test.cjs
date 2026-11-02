@@ -45,6 +45,15 @@ test("only persists validated model; failed replacement keeps old connection; re
           ? { data: [{ id: "gpt-4.1-mini" }, { id: "other-model" }] }
           : {
               choices: [{ message: { content: "test provider response" } }],
+              output: [
+                {
+                  type: "message",
+                  role: "assistant",
+                  content: [
+                    { type: "output_text", text: "test provider response" },
+                  ],
+                },
+              ],
             },
     };
   };

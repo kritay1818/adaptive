@@ -15,6 +15,22 @@ const {
 } = require("./provider-adapters.cjs");
 const validModel = (id) =>
   typeof id === "string" && /^[-a-zA-Z0-9._:]{1,200}$/.test(id);
+// Pasted keys often carry leading/trailing whitespace, line breaks or invisible direction marks (RTL input: U+200E/U+200F,
+// U+202A-202E, U+2066-2069, zero-width characters, BOM, NBSP). Remove the invisible marks anywhere and whitespace at the ends,
+// plus surrounding quotes or a "Bearer " prefix. Whitespace INSIDE a key is kept so validation rejects it (no header injection).
+function normalizeKey(value) {
+  const key = String(value ?? "")
+    .normalize("NFKC")
+    .replace(
+      /[\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/gu,
+      "",
+    )
+    .trim()
+    .replace(/^Bearer\s+/i, "")
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .trim();
+  return key;
+}
 const slot = (provider, region) => provider + (region ? ":" + region : "");
 function redact(text, key) {
   let out = String(text);
@@ -43,7 +59,8 @@ function visionError(messages, e) {
   return e;
 }
 class Provider {
-  constructor(dir, storage, fetcher = fetch) {
+  constructor(dir, storage, fetcher = fetch, options = {}) {
+    this.checkTools = options.tools || null;
     this.file = path.join(dir, "connection.json");
     this.storage = storage;
     this.fetch = fetcher;
@@ -244,9 +261,17 @@ class Provider {
     provider = "openai",
     region = "",
   ) {
-    const a = adapter(provider, region),
-      spec = generation(a, model, messages, validation);
-    const result = await this.transport(a, key, spec.url, spec.body);
+    const a = adapter(provider, region);
+    const { completionCap } = require("./tool-adapters.cjs");
+    const result = await this.send(a, key, model, (cap) =>
+      generation(
+        a,
+        model,
+        messages,
+        validation,
+        Math.min(4096, cap ?? Infinity, completionCap(a, model)),
+      ),
+    );
     const content = output(a, result);
     if (typeof content !== "string" || !content.trim())
       throw new Error(
@@ -264,11 +289,13 @@ class Provider {
       if (!r) throw new Error("בדקו מפתח API — אין מפתח שמור לספק ולאזור הזה");
       key = this.key(r);
     }
+    key = normalizeKey(key);
+    // HTTP header values must be printable ASCII; anything else (e.g. Hebrew letters pasted by mistake) can never be a valid key.
     if (
       typeof key !== "string" ||
       key.length < 10 ||
       key.length > 512 ||
-      /\s/.test(key)
+      !/^[\x21-\x7e]+$/.test(key)
     )
       throw new Error("בדקו את מפתח ה־API");
     this.busy = true;
@@ -342,14 +369,25 @@ class Provider {
       throw new Error("בחרו מודל מהרשימה שהוחזרה מהספק");
     this.busy = true;
     try {
-      await this.request(
+      // The check is the same request shape as a real chat step (tools, token limit, parameters), so a model or schema the
+      // provider rejects fails HERE with the provider's own message, not later in the chat.
+      const a = adapter(p.provider, p.region);
+      const reply = await this.toolRequest(
+        a,
         p.key,
         model,
-        [{ role: "user", content: "Reply with OK." }],
-        true,
-        p.provider,
-        p.region,
+        [
+          { role: "system", content: "Connection check. Answer briefly." },
+          { role: "user", content: "Reply with OK." },
+        ],
+        this.checkTools || require("./wp-agent.cjs").toolsFor([]),
+        undefined,
+        60000,
       );
+      if (!reply.text.trim() && !reply.calls.length)
+        throw new Error(
+          "המודל לא החזיר טקסט. ייתכן סינון תוכן, מגבלת טוקנים או מודל שאינו תומך בשיחה. לא ננסה שוב אוטומטית.",
+        );
       // Closing/resetting the native dialog revokes this candidate even if
       // the already-authorized remote validation finishes later.
       if (this.pending !== p)
@@ -400,25 +438,64 @@ class Provider {
     this.saved = next;
     return this.status();
   }
+  // Sends one model request and recovers from the two kinds of 400 that need no change to what is asked: a completion-token limit
+  // that is too high, and a tuning parameter this model does not support (dropped, or replaced by the value the error suggests).
+  // Each correction is remembered per model. Nothing has been generated or written when a 400 arrives, so repeating is safe.
+  async send(a, key, model, build, signal, timeoutMs) {
+    const t = require("./tool-adapters.cjs");
+    let cap;
+    for (let attempt = 0; ; attempt++) {
+      const spec = build(cap);
+      t.applyAdjustments(a, model, spec.body);
+      try {
+        return await this.transport(
+          a,
+          key,
+          spec.url,
+          spec.body,
+          signal,
+          timeoutMs,
+        );
+      } catch (e) {
+        if (attempt >= 4) throw e;
+        const limit = t.capFromError(e, t.sentLimit(spec.body));
+        if (limit) {
+          t.learnCap(a, model, limit);
+          cap = limit;
+          continue;
+        }
+        if (t.learnAdjustment(a, model, spec.body, e)) continue;
+        throw e;
+      }
+    }
+  }
+  // One tool-carrying chat request, built exactly like a real chat step.
+  async toolRequest(a, key, model, messages, tools, signal, timeoutMs) {
+    const { toolGeneration, toolOutput } = require("./tool-adapters.cjs");
+    const result = await this.send(
+      a,
+      key,
+      model,
+      (cap) => toolGeneration(a, model, messages, tools, cap),
+      signal,
+      timeoutMs,
+    );
+    return toolOutput(a, result);
+  }
   async step(messages, tools, signal) {
     this.guard();
     const r = this.active();
     if (!r) throw new Error("אין מודל מחובר");
     this.busy = true;
     try {
-      const { toolGeneration, toolOutput } = require("./tool-adapters.cjs");
-      const a = adapter(r.provider, r.region);
-      const spec = toolGeneration(a, this.saved.active.model, messages, tools);
-      return toolOutput(
-        a,
-        await this.transport(
-          a,
-          this.key(r),
-          spec.url,
-          spec.body,
-          signal,
-          300000,
-        ),
+      return await this.toolRequest(
+        adapter(r.provider, r.region),
+        this.key(r),
+        this.saved.active.model,
+        messages,
+        tools,
+        signal,
+        300000,
       );
     } catch (e) {
       throw visionError(messages, e);
@@ -457,4 +534,4 @@ class Provider {
     return this.status();
   }
 }
-module.exports = { Provider };
+module.exports = { Provider, normalizeKey };
