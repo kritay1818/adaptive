@@ -69,6 +69,19 @@
           <div id="activity-list" class="activity-list" role="feed"></div>
         </section>
         <div id="notice" role="status"></div>
+        <div id="update-bar" class="update-bar" role="status" hidden>
+          <span id="update-text"></span>
+          <span id="update-actions">
+            <button id="update-restart" type="button" class="primary">
+              הפעלה מחדש עכשיו
+            </button>
+            <button id="update-later" type="button">אחר כך</button>
+          </span>
+          <details id="update-tech" hidden>
+            <summary>פרטים טכניים</summary>
+            <pre id="update-tech-body" dir="ltr"></pre>
+          </details>
+        </div>
         <div
           id="progress"
           class="progress-line"
@@ -120,6 +133,10 @@
                 ⋯
               </summary>
               <div class="chat-more-menu">
+                <p id="app-version" class="chat-more-version" dir="rtl"></p>
+                <button id="chat-check-update" type="button">
+                  בדיקת עדכונים
+                </button>
                 <button id="chat-open-model" type="button">
                   חיבור מודל (מפתח API)…
                 </button>

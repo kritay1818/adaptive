@@ -118,7 +118,8 @@ const { Agent } = require("./wp-agent.cjs");
 const { describeError } = require("./errors.cjs");
 const { viewTarget } = require("./results.cjs");
 const diag = require("./diag.cjs");
-let agent, activeProject;
+const { createUpdater } = require("./updater.cjs");
+let agent, activeProject, updater;
 const { atomic } = require("./core.cjs");
 let wordpress,
   backend = "openai",
@@ -337,6 +338,35 @@ if (!app.requestSingleInstanceLock()) {
               since: progressSince,
             });
       };
+      // Automatic updates (GitHub Releases, public repo, no token). Failures are only logged; they never block the app.
+      let autoUpdater = null;
+      try {
+        autoUpdater = require("electron-updater").autoUpdater;
+      } catch (error) {
+        diag.log("update-error", { message: String(error?.message || error) });
+      }
+      updater = createUpdater({
+        autoUpdater,
+        currentVersion: app.getVersion(),
+        enabled: app.isPackaged,
+        portable: !!process.env.PORTABLE_EXECUTABLE_FILE,
+        // Never restart during a request, a connection check or while an approval card waits.
+        isBusy: () =>
+          connecting ||
+          inFlight.size > 0 ||
+          agent.pending.size > 0 ||
+          agent.running.size > 0,
+        prepareInstall: () => {
+          quitting = true;
+        },
+        onChange: () => {
+          for (const w of [sidebar, historyWindow])
+            if (w && !w.isDestroyed())
+              w.webContents.send("adactive:updateChanged");
+        },
+        log: (type, data) => diag.log(type, data),
+      });
+      updater.start();
       activeProject = store.list()[0].id;
       backendFile = path.join(app.getPath("userData"), "backend.json");
       if (fs.existsSync(backendFile))
@@ -542,6 +572,9 @@ if (!app.requestSingleInstanceLock()) {
       // Dedicated tray dialog binds the project in main; never trusts renderer IDs.
       // Opens <site>/wp-admin/profile.php#application-passwords-section in the default browser.
       // Redacted diagnostic log (last 200 network/verify events) saved as a .txt file the user can send to support.
+      handle("updateState", ["index", "history"], () => updater.state());
+      handle("checkUpdates", ["index", "history"], () => updater.checkNow());
+      handle("installUpdate", ["index", "history"], () => updater.install());
       handle("exportDiagnostics", ["index", "history"], async () => {
         const choice = await dialog.showSaveDialog(
           historyWindow?.isVisible() ? historyWindow : sidebar,

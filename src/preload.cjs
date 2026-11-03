@@ -46,6 +46,15 @@ contextBridge.exposeInMainWorld(
     wordPressState: () => call("wordPressState"),
     testWordPress: (fields) => call("testWordPress", fields),
     exportDiagnostics: () => call("exportDiagnostics"),
+    updateState: () => call("updateState"),
+    checkUpdates: () => call("checkUpdates"),
+    installUpdate: () => call("installUpdate"),
+    onUpdateChanged: (callback) => {
+      const listener = () => callback();
+      ipcRenderer.on("adactive:updateChanged", listener);
+      return () =>
+        ipcRenderer.removeListener("adactive:updateChanged", listener);
+    },
     openPasswordPage: (site) => call("openPasswordPage", { site }),
     closeWordPress: () => call("closeWordPress"),
     onWordPressReset: (callback) => {

@@ -79,13 +79,24 @@ jobs:
           name: ADActive-windows-${{ github.ref_name }}
           path: |
             dist/ADActive-Setup-*.exe
+            dist/ADActive-Setup-*.exe.blockmap
             dist/ADActive-*-portable.exe
+            dist/latest.yml
           if-no-files-found: error
 
-      - name: Attach to the GitHub release
+      # Normal (not draft) release. The app updates itself from latest.yml + the installer + its blockmap, so all of them
+      # must be attached. Uses the built-in GITHUB_TOKEN only (no personal token, none inside the app).
+      - name: Publish the GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/ADActive-Setup-*.exe
+            dist/ADActive-Setup-*.exe.blockmap
             dist/ADActive-*-portable.exe
-          draft: true
+            dist/latest.yml
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

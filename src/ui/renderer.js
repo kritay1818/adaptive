@@ -32,6 +32,9 @@
         "chat-open-model",
         "chat-open-wp",
         "chat-export-diag",
+        "chat-check-update",
+        "update-restart",
+        "update-later",
         "chat-export-txt",
       ].includes(element.id)
     )
@@ -1325,6 +1328,76 @@
         await notify(e.message, true);
       }
     };
+  // Updates: the "ready" notice (never restarts by itself), the version in the "⋯" menu and "בדיקת עדכונים".
+  let updateDismissed = "",
+    readyShown = false,
+    hideTimer;
+  function showUpdate(text, { actions = false, tech = "" } = {}) {
+    if (!$("update-bar")) return;
+    clearTimeout(hideTimer);
+    readyShown = actions;
+    $("update-text").textContent = text;
+    $("update-actions").hidden = !actions;
+    $("update-tech").hidden = !tech;
+    $("update-tech-body").textContent = tech;
+    $("update-bar").hidden = false;
+    // Plain results ("יש לך את הגרסה האחרונה") disappear by themselves; the restart question and errors stay.
+    if (!actions && !tech)
+      hideTimer = setTimeout(() => ($("update-bar").hidden = true), 8000);
+  }
+  async function refreshUpdate() {
+    if (!api?.updateState || !$("update-bar")) return;
+    try {
+      const u = await api.updateState();
+      if ($("app-version"))
+        $("app-version").textContent = `גרסה ${u.version || ""}`;
+      if (u.ready && u.readyVersion !== updateDismissed)
+        showUpdate("גרסה חדשה מוכנה — להפעיל מחדש?", { actions: true });
+      else if (!u.ready && readyShown) {
+        // A task or approval started: take the question away; it returns when the work is finished.
+        readyShown = false;
+        $("update-bar").hidden = true;
+      }
+    } catch {
+      /* Updates never block the chat. */
+    }
+  }
+  if ($("update-restart"))
+    $("update-restart").onclick = async () => {
+      try {
+        const r = await api.installUpdate();
+        if (!r.ok) showUpdate(r.message, { actions: true });
+      } catch (e) {
+        showUpdate("לא ניתן להפעיל מחדש כרגע.", { tech: e.message });
+      }
+    };
+  if ($("update-later"))
+    $("update-later").onclick = async () => {
+      try {
+        updateDismissed = (await api.updateState()).readyVersion || "";
+      } catch {
+        updateDismissed = "";
+      }
+      $("update-bar").hidden = true;
+      await notify("העדכון יותקן בסגירה הבאה של האפליקציה.");
+    };
+  if ($("chat-check-update"))
+    $("chat-check-update").onclick = async () => {
+      $("chat-more").open = false;
+      showUpdate("בודק עדכונים…");
+      try {
+        const r = await api.checkUpdates();
+        if (r.status === "ready") {
+          updateDismissed = "";
+          showUpdate("גרסה חדשה מוכנה — להפעיל מחדש?", { actions: true });
+        } else showUpdate(r.message, { tech: r.tech || "" });
+      } catch (e) {
+        showUpdate("לא ניתן לבדוק עדכונים כרגע.", { tech: e.message });
+      }
+    };
+  api?.onUpdateChanged?.(() => refreshUpdate());
+  // A task may finish without a state event: look again now and then so the question can appear when it is safe.
+  if (api?.updateState && $("update-bar")) setInterval(refreshUpdate, 30000);
   // Header "⋯" menu (history window only): export the last 20 messages, close.
   for (const [id, format] of [
     ["chat-export-md", "md"],
@@ -1350,13 +1423,16 @@
     $("history-close").addEventListener("click", () => {
       if ($("chat-more")) $("chat-more").open = false;
     });
-  const refresh = () =>
-    (history ? api.historyState() : api.state())
+  const refresh = () => {
+    refreshUpdate();
+    return (history ? api.historyState() : api.state())
       .then(render)
       .catch((e) => notify(e.message, true));
+  };
   api?.onStateChanged?.(() => {
     if (!busy) refresh();
   });
+  refreshUpdate();
   if (api)
     (history ? api.historyState() : api.state())
       .then(render)
