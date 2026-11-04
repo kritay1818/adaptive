@@ -462,6 +462,24 @@
     };
     return b;
   }
+  // Elementor Theme Builder templates: opens the template's editor link (built in main from the verified template ID).
+  function editButton(operation) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "view-site";
+    b.textContent = "פתיחה ב-Elementor";
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        await api.openElementorEditor(operation);
+      } catch (e) {
+        await notify(e.message, true);
+      } finally {
+        b.disabled = false;
+      }
+    };
+    return b;
+  }
   function reviewCard(review) {
     clearInterval(expiryTimer);
     if (!review) return;
@@ -1059,6 +1077,7 @@
         article.append(ul);
       }
       if (m.view) article.append(viewButton(m.view));
+      if (m.edit) article.append(editButton(m.edit));
       if (m.undo && icon !== "❌" && icon !== "⛔")
         article.append(undoButton(m));
       const more = [rest.join("\n").trim(), techText]

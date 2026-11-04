@@ -116,7 +116,7 @@ const { Provider } = require("./provider.cjs");
 const { WordPress } = require("./wordpress.cjs");
 const { Agent } = require("./wp-agent.cjs");
 const { describeError } = require("./errors.cjs");
-const { viewTarget } = require("./results.cjs");
+const { viewTarget, templateRows } = require("./results.cjs");
 const diag = require("./diag.cjs");
 const { createUpdater } = require("./updater.cjs");
 let agent, activeProject, updater;
@@ -1185,6 +1185,7 @@ if (!app.requestSingleInstanceLock()) {
             const result = await agent.decide(id, token, approve);
             store.append(id, "assistant", result.text, {
               view: result.view,
+              edit: result.edit,
               undo: result.undo,
               undoPlan: result.undoPlan,
             });
@@ -1231,6 +1232,46 @@ if (!app.requestSingleInstanceLock()) {
         await shell.openExternal(url.href);
         return true;
       });
+      // "פתיחה ב-Elementor": the editor link of a verified Theme Builder template, built here from the connected site and the
+      // template ID in the activity records (never from renderer input). Several templates open the Theme Builder list.
+      handle(
+        "openElementorEditor",
+        ["index", "history"],
+        async ({ operation } = {}) => {
+          const id = activeProject;
+          if (typeof operation !== "string" || operation.length > 100)
+            throw new Error("פעולה לא תקינה");
+          const site = wordpress.status(id).site;
+          const ids = [
+            ...new Set(
+              templateRows(
+                agent.records.filter(
+                  (r) =>
+                    r.project === id &&
+                    (r.operation === operation || r.planId === operation),
+                ),
+              ).map((r) => r.page),
+            ),
+          ];
+          if (!ids.length || !site)
+            throw new Error("אין תבנית לפתוח עבור הפעולה הזו");
+          const base = new URL(site.endsWith("/") ? site : site + "/");
+          if (base.protocol !== "https:")
+            throw new Error("כתובת האתר אינה מאובטחת");
+          let url;
+          if (ids.length === 1) {
+            url = new URL("wp-admin/post.php", base);
+            url.searchParams.set("post", String(ids[0]));
+            url.searchParams.set("action", "elementor");
+          } else {
+            url = new URL("wp-admin/edit.php", base);
+            url.searchParams.set("post_type", "elementor_library");
+            url.searchParams.set("tabs_group", "theme");
+          }
+          await shell.openExternal(url.href);
+          return true;
+        },
+      );
       handle("cancelWordPress", ["index", "history"], () => {
         agent.cancel(activeProject);
         return state();

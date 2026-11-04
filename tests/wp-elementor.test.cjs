@@ -1781,7 +1781,7 @@ test("a single page review lists its placeholders", async (t) => {
 });
 
 // ---- header and footer (Theme Builder) ------------------------------------------------------------------------------------------
-test("header/footer: Pro is detected, Theme Builder is never written, and the agent is told to explain and fall back", async (t) => {
+test("header/footer: Pro is detected, display conditions are never written, and the agent is told what to say", async (t) => {
   const withPro = await fixture(t, {
     plugins: [
       { plugin: "elementor/elementor", status: "active", version: "4.3.6" },
@@ -1795,9 +1795,9 @@ test("header/footer: Pro is detected, Theme Builder is never written, and the ag
   const info = await withPro.agent.elementor.detect("p");
   assert.deepEqual(info.pro, { active: true, version: "4.3.1" });
   assert.equal(info.themeBuilder.proActive, true);
-  assert.equal(info.themeBuilder.writable, false);
-  assert.match(info.themeBuilder.note, /Theme Builder/);
-  assert.match(info.themeBuilder.note, /אי אפשר לכתוב בבטחה מרחוק/);
+  assert.equal(info.themeBuilder.writable, true);
+  assert.match(info.themeBuilder.note, /wp_prepare_elementor_template/);
+  assert.match(info.themeBuilder.note, /תנאי התצוגה אי אפשר לכתוב מרחוק/);
   withPro.agent.elementorInfo.set("p", {
     site: withPro.wp.status("p").site,
     info,
@@ -1810,9 +1810,15 @@ test("header/footer: Pro is detected, Theme Builder is never written, and the ag
   const free = await fixture(t);
   const freeInfo = await free.agent.elementor.detect("p");
   assert.equal(freeInfo.themeBuilder.proActive, false);
+  assert.equal(freeInfo.themeBuilder.writable, false);
   assert.match(freeInfo.themeBuilder.note, /Elementor Pro אינו פעיל/);
-  // There is no tool that writes templates, and the page tool refuses template-like input.
-  assert.ok(!tools.some((x) => /theme_builder|template/i.test(x.name)));
+  // The only template tool is the Pro-only one (see wp-elementor-template.test.cjs); the page tool refuses template-like input.
+  assert.deepEqual(
+    tools
+      .filter((x) => /theme_builder|template/i.test(x.name))
+      .map((x) => x.name),
+    ["wp_prepare_elementor_template"],
+  );
   for (const type of ["header", "footer"])
     assert.throws(
       () =>

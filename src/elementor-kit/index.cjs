@@ -654,6 +654,159 @@ const PATTERNS = {
 };
 const PATTERN_NAMES = Object.keys(PATTERNS);
 
+// ---- Theme Builder templates (Elementor Pro): header and footer ----------------------------------------------------------------
+// Same colors, contrast rules, validator and builder as the page patterns. Not part of PATTERNS (they are not page sections).
+// Data (already validated by validateTemplate): logo {source: "site"|"media", mediaId, alt, width}, navigation "menu"|"links"|"none",
+// menuSlug (resolved by the app from the site's menu), menuLinks, buttons, text, contacts, footerLinks, copyright, tone.
+function surface(k, tone, dark) {
+  let bg = (tone || (dark ? "dark" : "light")) === "dark" ? k.primary : k.white;
+  if (!k.known(bg)) bg = k.dark; // an unknown global is never trusted: the kit's own dark color keeps the text readable
+  const b = k.known(bg);
+  const isDark = luminance(b) < 0.4;
+  return {
+    bg,
+    isDark,
+    ink: readable(k, bg, isDark ? k.white : k.text),
+    strong: readable(k, bg, isDark ? k.white : k.primary),
+  };
+}
+function logoWidget(logo, widthPercent) {
+  if (!logo) return null;
+  const w = logo.width ?? 140;
+  return logo.source === "site"
+    ? { type: "site-logo", width: w }
+    : {
+        type: "image",
+        mediaId: logo.mediaId,
+        ...(has(logo.alt) ? { alt: logo.alt } : {}),
+        width: widthPercent ?? Math.min(40, Math.max(8, Math.round(w / 12))),
+      };
+}
+function buildHeader(d, k) {
+  const { bg, isDark, ink } = surface(k, d.tone, false);
+  const links = Array.isArray(d.menuLinks) ? d.menuLinks : [];
+  const nav =
+    d.navigation === "menu"
+      ? { type: "nav-menu", menuSlug: d.menuSlug, align: "center", color: ink }
+      : d.navigation === "links" && links.length
+        ? column(
+            { direction: "row", wrap: true, gap: 20, align: "center" },
+            links.map((l) =>
+              heading(l.text, 6, {
+                color: ink,
+                size: 16,
+                weight: 600,
+                url: l.url,
+              }),
+            ),
+          )
+        : null;
+  const buttons = Array.isArray(d.buttons) ? d.buttons : [];
+  const actions = buttons.length
+    ? column(
+        { direction: "row", wrap: true, gap: 10, align: "center" },
+        buttons.map((b, i) => {
+          const fill = i === 0 ? k.accent : isDark ? k.white : k.primary;
+          return button(b.text, b.url, {
+            background: fill,
+            color: readable(
+              k,
+              fill,
+              i === 0 || !isDark ? k.white : k.primary,
+              3,
+            ),
+            size: 16,
+            weight: 700,
+          });
+        }),
+      )
+    : null;
+  const children = clean([logoWidget(d.logo), nav, actions]);
+  if (!children.length)
+    fail("header: אין תוכן (נדרש logo, navigation או buttons)");
+  return [
+    {
+      width: "full",
+      direction: "row",
+      justify: "between",
+      align: "center",
+      wrap: true,
+      gap: 20,
+      paddingX: 24,
+      paddingY: 14,
+      background: bg,
+      children,
+    },
+  ];
+}
+function buildFooter(d, k) {
+  const { bg, ink, strong } = surface(k, d.tone, true);
+  const links = Array.isArray(d.footerLinks) ? d.footerLinks : [];
+  const contacts = Array.isArray(d.contacts) ? d.contacts : [];
+  const cols = clean([
+    (d.logo || has(d.text)) &&
+      column(
+        { widthPercent: 31, direction: "column", gap: 10 },
+        clean([
+          logoWidget(d.logo),
+          has(d.text) && text(d.text, { color: ink, size: 15 }),
+        ]),
+      ),
+    links.length &&
+      column({ widthPercent: 31, direction: "column", gap: 10 }, [
+        heading(d.linksTitle || "ניווט", 4, {
+          color: strong,
+          size: 20,
+          weight: 700,
+        }),
+        {
+          type: "icon-list",
+          icon: "circle",
+          color: ink,
+          size: 15,
+          items: links.map((l) => ({ text: l.text, url: l.url })),
+        },
+      ]),
+    contacts.length &&
+      column({ widthPercent: 31, direction: "column", gap: 10 }, [
+        heading(d.contactsTitle || "יצירת קשר", 4, {
+          color: strong,
+          size: 20,
+          weight: 700,
+        }),
+        ...contactWidgets(contacts, { ...k, text: ink }),
+      ]),
+    has(d.copyright) &&
+      column({ widthPercent: 100, direction: "column", gap: 8 }, [
+        { type: "divider", color: ink, thickness: 1 },
+        text(d.copyright, { color: ink, size: 13, align: "center" }),
+      ]),
+  ]);
+  if (!cols.length)
+    fail(
+      "footer: אין תוכן (נדרש logo, text, footerLinks, contacts או copyright)",
+    );
+  return [
+    {
+      width: "full",
+      direction: "row",
+      wrap: true,
+      gap: 32,
+      justify: "between",
+      paddingX: 24,
+      paddingY: 56,
+      background: bg,
+      children: cols,
+    },
+  ];
+}
+function buildTemplate(type, data, { palette = null, values = null } = {}) {
+  const k = colors(palette, values);
+  if (type === "header") return buildHeader(data, k);
+  if (type === "footer") return buildFooter(data, k);
+  fail('type: "header" או "footer"');
+}
+
 // patterns: [{pattern, data}] -> container list. palette: hex map when the site cannot offer global colors.
 function expandPatterns(patterns, { palette = null, values = null } = {}) {
   if (!Array.isArray(patterns) || patterns.length > 12)
@@ -772,4 +925,5 @@ module.exports = {
   DEFAULT_PALETTE,
   DATA_KEYS,
   toHtml,
+  buildTemplate,
 };

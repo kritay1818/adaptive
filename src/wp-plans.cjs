@@ -6,7 +6,12 @@ const { atomic } = require("./core.cjs");
 const { structureTools, digest, same, pick } = require("./wp-structure.cjs");
 const { PATTERNS, expandStep } = require("./design-kit/index.cjs");
 const { doneText } = require("./results.cjs");
-const { containersSchema, ELEMENTOR_UNDOABLE } = require("./wp-elementor.cjs");
+const {
+  containersSchema,
+  ELEMENTOR_UNDOABLE,
+  TEMPLATE_TOOL,
+  templateProps,
+} = require("./wp-elementor.cjs");
 const { patternsSchema } = require("./elementor-kit/index.cjs");
 const { globalsSchema } = require("./elementor-globals.cjs");
 const { INFRA_UNDOABLE } = require("./wp-infra.cjs");
@@ -25,6 +30,7 @@ const ACTIONS = [
   ELEMENTOR,
   GLOBALS,
   TERM,
+  TEMPLATE_TOOL,
   ...structureTools
     .filter((t) => t.name.startsWith("wp_prepare_"))
     .map((t) => t.name),
@@ -40,6 +46,7 @@ const LABELS = {
   [ELEMENTOR]: "עמוד Elementor",
   [GLOBALS]: "צבעים וגופנים גלובליים (Elementor)",
   [TERM]: "יצירת קטגוריה/תגית",
+  [TEMPLATE_TOOL]: "תבנית כותרת/תחתית (Elementor Pro)",
   wp_prepare_menu: "הגדרת התפריט הראשי",
   wp_prepare_front_page: "הגדרת דף הבית",
   wp_prepare_site_css: "עיצוב האתר (CSS)",
@@ -158,6 +165,12 @@ const planTool = {
               name: str,
               slug: str,
               description: str,
+              // Elementor Pro header/footer template (id and title are shared with the other steps).
+              ...Object.fromEntries(
+                Object.entries(templateProps(referenceId)).filter(
+                  ([k]) => !["id", "title"].includes(k),
+                ),
+              ),
               globalColors: globalsSchema.globalColors,
               globalFonts: globalsSchema.globalFonts,
               graphicId: str,
@@ -490,22 +503,37 @@ function validatePlan(args, validate) {
         placeholderContent(step.args.content);
       if (step.tool === "wp_prepare_menu" && ++menus > 1)
         error("אפשר להגדיר תפריט ראשי אחד בכל תוכנית");
+      // The header shows the site's menu, so the menu step must run first (the template is built at execution time).
+      if (
+        step.tool === "wp_prepare_menu" &&
+        args.steps
+          .slice(0, index)
+          .some(
+            (s) =>
+              s.tool === TEMPLATE_TOOL &&
+              s.args?.type === "header" &&
+              (s.args.navigation ?? "menu") === "menu",
+          )
+      )
+        error("שלב התפריט חייב לבוא לפני שלב הכותרת (Elementor Pro) בתוכנית");
       const changed =
         step.tool === GLOBALS
           ? ["elementor_globals"]
-          : step.tool === "wp_prepare_front_page"
-            ? ["show_on_front", "page_on_front"]
-            : step.tool === "wp_prepare_site_identity"
-              ? Object.keys(step.args)
-              : step.tool === "wp_prepare_site_css"
-                ? ["site_css"]
-                : step.tool === "wp_prepare_site_logo"
-                  ? ["site_logo"]
-                  : step.tool === "wp_prepare_header"
-                    ? ["tpl_header"]
-                    : step.tool === "wp_prepare_footer"
-                      ? ["tpl_footer"]
-                      : [];
+          : step.tool === TEMPLATE_TOOL
+            ? [`elementor_template_${step.args.type}`]
+            : step.tool === "wp_prepare_front_page"
+              ? ["show_on_front", "page_on_front"]
+              : step.tool === "wp_prepare_site_identity"
+                ? Object.keys(step.args)
+                : step.tool === "wp_prepare_site_css"
+                  ? ["site_css"]
+                  : step.tool === "wp_prepare_site_logo"
+                    ? ["site_logo"]
+                    : step.tool === "wp_prepare_header"
+                      ? ["tpl_header"]
+                      : step.tool === "wp_prepare_footer"
+                        ? ["tpl_footer"]
+                        : [];
       for (const key of changed) {
         if (settings.has(key)) error("כל הגדרת אתר נכתבת פעם אחת בלבד בתוכנית");
         settings.add(key);
@@ -651,7 +679,8 @@ class BuildPlans {
           );
         } else if (
           definition.tool === ELEMENTOR ||
-          definition.tool === GLOBALS
+          definition.tool === GLOBALS ||
+          definition.tool === TEMPLATE_TOOL
         ) {
           pending = await agent.elementor.prepare(
             agent,

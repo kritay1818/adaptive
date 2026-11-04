@@ -134,6 +134,9 @@ class Store {
       ...(typeof meta?.view === "string" && meta.view.length <= 100
         ? { view: meta.view }
         : {}),
+      ...(typeof meta?.edit === "string" && meta.edit.length <= 100
+        ? { edit: meta.edit }
+        : {}),
       ...(typeof meta?.undo === "string" && meta.undo.length <= 100
         ? {
             undo: meta.undo,

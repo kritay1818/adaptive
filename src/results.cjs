@@ -27,6 +27,14 @@ function doneText(p, result = {}) {
       return `נוצרה טיוטת עמוד Elementor: ${quote(title)}`;
     case "elementor-update":
       return `עמוד Elementor עודכן: ${quote(title)}`;
+    case "elementor-template-create":
+      return `נוצרה תבנית ${result.template?.type || p.target?.templateType || ""} — כדי להציג אותה בכל האתר: פתחו ב-Elementor ← Publish ← Entire Site`;
+    case "elementor-template-update":
+      return `תבנית ${result.template?.type || p.target?.templateType || ""} עודכנה: ${quote(title)}${result.template?.status === "draft" ? " — כדי להציג אותה בכל האתר: פתחו ב-Elementor ← Publish ← Entire Site" : ""}`;
+    case "elementor-template-trash":
+      return `תבנית ${quote(title)} הועברה לפח`;
+    case "elementor-template-revert":
+      return `התוכן הקודם של התבנית ${quote(title)} שוחזר`;
     case "elementor-globals":
       return "הצבעים והגופנים הגלובליים של Elementor עודכנו";
     case "elementor-globals-revert":
@@ -111,6 +119,22 @@ function viewTarget(rows) {
   return media ? { type: "media", id: media.page } : null;
 }
 
+// Verified Elementor Theme Builder templates among the records: "פתיחה ב-Elementor" is offered for them.
+const TEMPLATE_KINDS = new Set([
+  "elementor-template-create",
+  "elementor-template-update",
+]);
+const templateRows = (rows) =>
+  rows.filter(
+    (r) =>
+      r &&
+      r.state === "verified" &&
+      TEMPLATE_KINDS.has(r.kind) &&
+      Number.isSafeInteger(r.page) &&
+      r.page > 0,
+  );
+const editsTemplate = (rows) => templateRows(rows).length > 0;
+
 // What a (possibly unverified) operation was, in plain Hebrew, for the "project is blocked" card.
 const KIND_LABELS = {
   create: "יצירת טיוטה",
@@ -130,6 +154,8 @@ const KIND_LABELS = {
   "elementor-create": "יצירת עמוד Elementor",
   "elementor-update": "עדכון עמוד Elementor",
   "elementor-globals": "עדכון צבעים וגופנים גלובליים",
+  "elementor-template-create": "יצירת תבנית כותרת/תחתית של Elementor",
+  "elementor-template-update": "עדכון תבנית כותרת/תחתית של Elementor",
   "build-plan": "תוכנית בנייה",
 };
 const kindLabel = (kind) =>
@@ -141,4 +167,10 @@ const kindLabel = (kind) =>
       : String(kind || "").startsWith("plugin-")
         ? "שינוי תוסף"
         : "שינוי באתר");
-module.exports = { doneText, viewTarget, kindLabel };
+module.exports = {
+  doneText,
+  viewTarget,
+  editsTemplate,
+  templateRows,
+  kindLabel,
+};

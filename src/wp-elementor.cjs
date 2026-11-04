@@ -27,6 +27,10 @@ const {
   DATA_KEYS,
 } = require("./elementor-kit/index.cjs");
 
+// Theme Builder header/footer templates (Elementor Pro). The helpers are handed over at the bottom of this file.
+const H = {};
+const tpl = require("./wp-elementor-template.cjs")(H);
+
 const LIMIT = 3 * 1024 * 1024; // response size cap
 const MAX_DATA = 300 * 1024; // size cap of the _elementor_data we write
 const MAX_BEFORE = 400 * 1024; // larger existing pages cannot be kept for undo, so they are not updated
@@ -67,6 +71,10 @@ const WIDGETS = [
   "icon-list",
   "video",
 ];
+// Elementor Pro widgets, only for Theme Builder templates (count.pro / ctx.pro): never in pages.
+const PRO_WIDGETS = ["nav-menu", "site-logo"];
+const PRO_KINDS = ["nav-menu", "theme-site-logo"];
+const MENU_SLUG = /^[A-Za-z0-9_%.-]{1,200}$/;
 const ICONS = {
   check: ["fas fa-check", "fa-solid"],
   star: ["fas fa-star", "fa-solid"],
@@ -106,6 +114,8 @@ const WIDGET_KEYS = {
   divider: ["color", "thickness", "width", "align"],
   "icon-list": ["items", "icon", "align", "color", "size"],
   video: ["mediaId", "url", "controls", "loop"],
+  "nav-menu": ["menuSlug", "align", "color"],
+  "site-logo": ["width", "align"],
 };
 const CONTAINER_KEYS = [
   "direction",
@@ -215,16 +225,22 @@ const elementorTools = [
     ),
   },
 ];
-elementorTools.push(...globalsTools);
+elementorTools.push(...globalsTools, ...tpl.templateTools);
 const ELEMENTOR_READS = new Set([
   "wp_read_elementor_page",
   "wp_read_elementor_globals",
 ]);
-const ELEMENTOR_WRITES = new Set(["wp_prepare_elementor_page", GLOBALS_TOOL]);
+const ELEMENTOR_WRITES = new Set([
+  "wp_prepare_elementor_page",
+  GLOBALS_TOOL,
+  tpl.TEMPLATE_TOOL,
+]);
 const ELEMENTOR_UNDOABLE = new Set([
   "elementor-create",
   "elementor-update",
   "elementor-globals",
+  "elementor-template-create",
+  "elementor-template-update",
 ]);
 const TOOL = "wp_prepare_elementor_page";
 
@@ -384,7 +400,7 @@ function checkWidget(node, label, count) {
     fail(
       `${label}: ווידג'ט "${type}" אסור (HTML, קוד מותאם, shortcode, הטמעות וטפסים אינם נתמכים)`,
     );
-  if (!WIDGETS.includes(type))
+  if (!WIDGETS.includes(type) && !(count.pro && PRO_WIDGETS.includes(type)))
     fail(
       `${label}: סוג ווידג'ט לא מוכר "${type}". מותרים: ${WIDGETS.join(", ")}`,
     );
@@ -435,6 +451,11 @@ function checkWidget(node, label, count) {
       if (item.url !== undefined) link(item.url, `${label}.items[${i}].url`);
     });
     if (a("icon")) oneOf(node.icon, Object.keys(ICONS), `${label}.icon`);
+  } else if (type === "nav-menu") {
+    if (typeof node.menuSlug !== "string" || !MENU_SLUG.test(node.menuSlug))
+      fail(`${label}.menuSlug: מזהה תפריט לא תקין`);
+  } else if (type === "site-logo") {
+    if (a("width")) range(node.width, 40, 400, `${label}.width`);
   } else if (type === "video") {
     if (a("mediaId") === a("url"))
       fail(
@@ -515,6 +536,7 @@ function validateElementor(name, args, opts = {}) {
     return {};
   }
   if (name === GLOBALS_TOOL) return validateGlobals(args);
+  if (name === tpl.TEMPLATE_TOOL) return tpl.validateTemplate(args);
   if (name !== TOOL) fail("כלי Elementor לא מוכר");
   onlyKeys(args, ["id", "title", "containers", "patterns"], TOOL);
   if (args.id !== undefined && !numericId(args.id))
@@ -671,7 +693,12 @@ function widgetElement(node, path, ctx) {
       setAlign();
       if (node.width !== undefined) {
         settings.width = { unit: "%", size: node.width, sizes: [] };
-        settings.width_mobile = { unit: "%", size: 100, sizes: [] };
+        // Small images (a logo) stay small on phones; larger ones fill the width.
+        settings.width_mobile = {
+          unit: "%",
+          size: node.width <= 40 ? Math.min(100, node.width * 2) : 100,
+          sizes: [],
+        };
       }
       if (node.url) {
         settings.link_to = "custom";
@@ -715,6 +742,25 @@ function widgetElement(node, path, ctx) {
       }
       break;
     }
+    case "nav-menu":
+      settings.menu = node.menuSlug;
+      settings.layout = "horizontal";
+      settings.align_items = node.align ?? "center";
+      // Below the tablet breakpoint the menu becomes the burger dropdown.
+      settings.dropdown = "tablet";
+      settings.toggle = "burger";
+      colorSetting(settings, globals, "color_menu_item", node.color);
+      colorSetting(settings, globals, "color_menu_item_hover", node.color);
+      break;
+    case "site-logo":
+      settings.width = { unit: "px", size: node.width ?? 140, sizes: [] };
+      settings.width_mobile = {
+        unit: "px",
+        size: Math.min(node.width ?? 140, 120),
+        sizes: [],
+      };
+      setAlign();
+      break;
     case "video": {
       if (node.url) {
         const v = parseVideoUrl(node.url);
@@ -734,7 +780,7 @@ function widgetElement(node, path, ctx) {
   return {
     id: eid(path),
     elType: "widget",
-    widgetType: node.type,
+    widgetType: node.type === "site-logo" ? "theme-site-logo" : node.type,
     isInner: false,
     settings,
     elements: [],
@@ -951,6 +997,17 @@ const SETTING_KEYS = {
     "controls",
     "loop",
   ],
+  "nav-menu": [
+    "menu",
+    "layout",
+    "align_items",
+    "dropdown",
+    "toggle",
+    "color_menu_item",
+    "color_menu_item_hover",
+    "__globals__",
+  ],
+  "theme-site-logo": ["width", "width_mobile", "align"],
 };
 function checkBuilt(data, ctx, origin) {
   let n = 0;
@@ -974,6 +1031,10 @@ function checkBuilt(data, ctx, origin) {
       fail("אלמנט Elementor לא מותר");
     const kind = el.elType === "container" ? "container" : el.widgetType;
     if (!SETTING_KEYS[kind]) fail("סוג אלמנט Elementor לא מותר");
+    if (PRO_KINDS.includes(kind) && !ctx?.pro)
+      fail("ווידג'טים של Elementor Pro מותרים רק בתבניות Theme Builder");
+    if (kind === "nav-menu" && !MENU_SLUG.test(String(el.settings.menu)))
+      fail("מזהה תפריט לא תקין");
     if (!object(el.settings)) fail("הגדרות אלמנט לא תקינות");
     for (const key of Object.keys(el.settings))
       if (!SETTING_KEYS[kind].includes(key))
@@ -1047,7 +1108,7 @@ function parseData(text) {
   return data;
 }
 // Which parts of an existing page this app could not keep (legacy sections, other widgets).
-function inspectExisting(data) {
+function inspectExisting(data, pro = false) {
   const unsupported = new Set();
   let count = 0;
   const visit = (el) => {
@@ -1055,7 +1116,10 @@ function inspectExisting(data) {
     if (!object(el)) return unsupported.add("לא ידוע");
     if (el.elType === "container") (el.elements || []).forEach(visit);
     else if (el.elType === "widget") {
-      if (!WIDGETS.includes(el.widgetType))
+      if (
+        !WIDGETS.includes(el.widgetType) &&
+        !(pro && PRO_KINDS.includes(el.widgetType))
+      )
         unsupported.add(String(el.widgetType || "widget").slice(0, 40));
     } else unsupported.add(String(el.elType || "לא ידוע").slice(0, 40));
   };
@@ -1211,6 +1275,10 @@ function outline(args) {
         return `רשימה (${n.items.length})`;
       case "video":
         return n.url ? `וידאו (${n.url})` : `וידאו #${n.mediaId}`;
+      case "nav-menu":
+        return "תפריט ניווט של האתר";
+      case "site-logo":
+        return "לוגו האתר";
       default:
         return n.type;
     }
@@ -1252,6 +1320,9 @@ const gte = (version, min) => {
 // Elementor keeps generated CSS per page. A write through REST does not refresh it, so after a VERIFIED update the app asks
 // Elementor to clear that cache (its own editor route DELETE /elementor/v1/cache: undocumented, needs an administrator,
 // idempotent, CSS is regenerated on the next page view). Failure never fails the write; the manual step is then the fallback.
+// Shown on the result card when the library type taxonomy is not exposed to REST (the template may not be listed yet).
+const LIB_NOTE =
+  "אם התבנית לא מופיעה ב-Theme Builder, פתחו אותה בכפתור ושמרו פעם אחת ב-Elementor";
 const CSS_NOTE =
   "אם העיצוב באתר אינו מתרענן אחרי העדכון: ב־WordPress ← Elementor ← כלים ← Regenerate CSS & Data. האפליקציה לא הצליחה לנקות את מטמון ה־CSS של Elementor מרחוק.";
 const CSS_CLEARED =
@@ -1275,8 +1346,16 @@ class ElementorBuilder {
       signal,
       missing = false,
       timeoutMs,
+      base: tax,
     },
   ) {
+    // base: REST base of the elementor_library_type taxonomy (discovered from /wp/v2/taxonomies), used by two routes only.
+    if (
+      tax !== undefined &&
+      !(typeof tax === "string" && /^[a-z0-9_-]{1,64}$/.test(tax))
+    )
+      fail();
+    if (route === "libterms" && tax === undefined) fail();
     if (
       ![
         "index",
@@ -1286,6 +1365,10 @@ class ElementorBuilder {
         "gfonts",
         "cache",
         "pages",
+        "templates",
+        "menus",
+        "taxonomies",
+        "libterms",
       ].includes(route) ||
       !["GET", "POST", "DELETE"].includes(method)
     )
@@ -1303,13 +1386,36 @@ class ElementorBuilder {
             Object.keys(payload.value).some((k) => !FONT_VALUE_KEY.test(k)))
       )
         fail();
+    } else if (method === "POST" && route === "libterms") {
+      // The two library type terms Elementor itself uses; nothing else can be created through this route.
+      if (
+        !object(payload) ||
+        Object.keys(payload).some((k) => !["name", "slug"].includes(k)) ||
+        !["header", "footer"].includes(payload.slug) ||
+        payload.name !== payload.slug
+      )
+        fail();
     } else if (method === "POST") {
-      if (route !== "pages" || !object(payload) || !Object.keys(payload).length)
+      if (
+        !["pages", "templates"].includes(route) ||
+        !object(payload) ||
+        !Object.keys(payload).length
+      )
         fail();
       if (
         Object.keys(payload).some(
-          (k) => !["title", "status", "meta"].includes(k),
+          (k) =>
+            !["title", "status", "meta", ...(tax ? [tax] : [])].includes(k),
         )
+      )
+        fail();
+      if (
+        tax &&
+        payload[tax] !== undefined &&
+        (route !== "templates" ||
+          !Array.isArray(payload[tax]) ||
+          payload[tax].length !== 1 ||
+          !numericId(payload[tax][0]))
       )
         fail();
       if (
@@ -1329,6 +1435,13 @@ class ElementorBuilder {
           Object.keys(payload.meta).some((k) => !allowed.includes(k))
         )
           fail();
+        const kind = payload.meta._elementor_template_type;
+        if (
+          route === "templates" &&
+          kind !== undefined &&
+          !["header", "footer"].includes(kind)
+        )
+          fail();
         const settings = payload.meta._elementor_page_settings;
         if (
           settings !== undefined &&
@@ -1343,7 +1456,7 @@ class ElementorBuilder {
     }
     if (
       target !== null &&
-      !(route === "pages"
+      !(["pages", "templates"].includes(route)
         ? numericId(target)
         : (route === "gcolors" || route === "gfonts") &&
           GLOBAL_ID.test(String(target)))
@@ -1352,14 +1465,21 @@ class ElementorBuilder {
     if (route === "cache" ? method !== "DELETE" : method === "DELETE") fail();
     if (
       method === "POST" &&
-      route !== "pages" &&
-      route !== "gcolors" &&
-      route !== "gfonts"
+      !["pages", "templates", "gcolors", "gfonts", "libterms"].includes(route)
     )
       fail();
+    if (["menus", "taxonomies"].includes(route) && method !== "GET") fail();
+    if (route === "taxonomies" && target !== null) fail();
     if (method === "DELETE" && (target !== null || payload !== undefined))
       fail();
-    const queryKeys = ["per_page", "search", "context", "_fields", "status"];
+    const queryKeys = [
+      "per_page",
+      "search",
+      "context",
+      "_fields",
+      "status",
+      "slug",
+    ];
     if (Object.keys(query).some((k) => !queryKeys.includes(k))) fail();
     if (!this.wp.secure() || !this.wp.data[project])
       fail("אין חיבור מאובטח לאתר");
@@ -1390,7 +1510,15 @@ class ElementorBuilder {
                   ? `/elementor/v1/globals/typography${target === null ? "" : "/" + target}`
                   : route === "cache"
                     ? "/elementor/v1/cache"
-                    : `/wp/v2/pages${target === null ? "" : "/" + target}`;
+                    : route === "taxonomies"
+                      ? "/wp/v2/taxonomies"
+                      : route === "libterms"
+                        ? `/wp/v2/${tax}`
+                        : route === "menus"
+                          ? "/wp/v2/menus"
+                          : route === "templates"
+                            ? `/wp/v2/elementor_library${target === null ? "" : "/" + target}`
+                            : `/wp/v2/pages${target === null ? "" : "/" + target}`;
       url.searchParams.set("rest_route", path);
       for (const [k, v] of Object.entries(query))
         url.searchParams.set(k, String(v));
@@ -1494,7 +1622,9 @@ class ElementorBuilder {
       return rejected(
         route === "plugins"
           ? "אין לחשבון המחובר הרשאה לקרוא את רשימת התוספים."
-          : "אין לחשבון המחובר הרשאה לערוך עמודי Elementor (נדרשת הרשאת עורך או מנהל). בקשו ממנהל האתר לשנות את ההרשאות.",
+          : route === "templates"
+            ? "אין לחשבון המחובר הרשאה לערוך תבניות Elementor (נדרשת הרשאת מנהל)."
+            : "אין לחשבון המחובר הרשאה לערוך עמודי Elementor (נדרשת הרשאת עורך או מנהל). בקשו ממנהל האתר לשנות את ההרשאות.",
       );
     if (status === 404)
       return rejected(
@@ -1563,12 +1693,13 @@ class ElementorBuilder {
     if (out.active === true) out.globals = await this.globals(project, signal);
     // Theme Builder (header/footer templates) needs Elementor Pro. Their display conditions and the conditions cache are not
     // writable over REST, so the app never writes them; the agent explains this and falls back to the theme's own header/footer.
+    // The template itself is written (a draft); its display conditions are not writable over REST, so the user publishes it once.
     out.themeBuilder = {
       proActive: !!out.pro?.active,
-      writable: false,
+      writable: !!out.pro?.active,
       note: out.pro?.active
-        ? "Elementor Pro פעיל, אבל תבניות Theme Builder (כותרת ותחתית) אי אפשר לכתוב בבטחה מרחוק: תנאי התצוגה שלהן והמטמון שלהם אינם נכתבים דרך ה־REST. הכותרת והתחתית נשארות של ערכת העיצוב (בערכת בלוקים אפשר לעדכן אותן כתבניות בלוקים). אפשר ליצור אותן ידנית ב־Templates ← Theme Builder, או להוסיף אזור תחתון לעמודים."
-        : "Elementor Pro אינו פעיל, ולכן אין Theme Builder. הכותרת והתחתית נשארות של ערכת העיצוב (בערכת בלוקים אפשר לעדכן אותן כתבניות בלוקים).",
+        ? `Elementor Pro פעיל: אפשר ליצור ולעדכן כותרת ותחתית עם wp_prepare_elementor_template (נוצרות כטיוטה). תנאי התצוגה אי אפשר לכתוב מרחוק, ולכן אחרי האישור אמרו למשתמש את הצעד הידני האחד: ${tpl.MANUAL_STEP}.`
+        : "Elementor Pro אינו פעיל, ולכן אין Theme Builder וכלי הכותרת/תחתית אינו זמין. אמרו למשתמש בעברית שכותרת ותחתית דורשות Elementor Pro; הכותרת והתחתית נשארות של ערכת העיצוב (בערכת בלוקים אפשר לעדכן אותן כתבניות בלוקים).",
     };
     return out;
   }
@@ -1784,13 +1915,22 @@ class ElementorBuilder {
     agent,
     project,
     kind,
-    { target, before, payload, preview, warning, summary, pageId = null },
+    {
+      target,
+      before,
+      payload,
+      preview,
+      warning,
+      summary,
+      pageId = null,
+      resource = "pages",
+    },
   ) {
     const view = {
       token: randomUUID(),
       project,
       site: this.wp.status(project).site,
-      resource: "pages",
+      resource,
       kind,
       pageId,
       before: preview.before,
@@ -1815,6 +1955,8 @@ class ElementorBuilder {
   async prepare(agent, project, name, args, signal, plan = null) {
     if (name === GLOBALS_TOOL)
       return this.prepareGlobals(agent, project, args, signal);
+    if (name === tpl.TEMPLATE_TOOL)
+      return this.prepareTemplate(agent, project, args, signal, plan);
     const first = validateElementor(name, args);
     const info = await this.gate(project, signal);
     // A site that cannot offer global colors gets the kit patterns with a hex palette instead of global references.
@@ -1959,6 +2101,8 @@ class ElementorBuilder {
   // Plan step at execution time: references are real ids now, so the media is resolved and the JSON rebuilt from them.
   async finalize(agent, project, p, args, signal) {
     if (p.kind === "elementor-globals") return p; // no references to resolve; the precondition check guards drift
+    if (p.kind.startsWith("elementor-template"))
+      return this.finalizeTemplate(agent, project, p, args, signal);
     const a = validateElementor(TOOL, args, {
       palette: p.target?.palette || null,
       values: p.target?.values || null,
@@ -2356,12 +2500,18 @@ class ElementorBuilder {
     if (entry.action === "elementor-globals")
       return this.prepareGlobalsUndo(agent, project, entry, signal);
     const t = entry.target || {};
+    // Theme Builder templates are undone the same way (trash the draft the app created, or restore the previous data).
+    const templates = entry.resource === "templates";
+    const route = templates ? "templates" : "pages";
+    const resource = templates ? "templates" : "pages";
+    const named = (name) =>
+      templates ? name.replace("elementor-", "elementor-template-") : name;
     const stale = () =>
       fail(
         "העמוד השתנה באתר מאז הפעולה. יש לבדוק אותו לפני הכנת שחזור; לא יידרסו שינויים חדשים.",
       );
     const pageId = entry.written?.id ?? entry.pageId;
-    const current = await this.readPage(project, pageId, signal, true);
+    const current = await this.readDoc(project, route, pageId, signal, true);
     if (!current) stale();
     const now = {
       id: current.id,
@@ -2372,10 +2522,14 @@ class ElementorBuilder {
       dataDigest: digest(canon(parseData(current.data || "[]"))),
     };
     if (digest(now) !== digest(entry.written)) stale();
-    if (entry.action === "elementor-create") {
+    if (
+      entry.action.replace(/^elementor-template-/, "elementor-") ===
+      "elementor-create"
+    ) {
       if (current.status !== "draft")
         fail("לא ניתן לבטל יצירה — העמוד כבר אינו טיוטה באתר.");
-      return this.pending(agent, project, "elementor-trash", {
+      return this.pending(agent, project, named("elementor-trash"), {
+        resource,
         target: { pageId: current.id },
         before: current,
         payload: { status: "trash" },
@@ -2415,8 +2569,13 @@ class ElementorBuilder {
       if (canonText(settings) !== canonText(current.pageSettings))
         payload.meta._elementor_page_settings = settings;
     }
-    return this.pending(agent, project, "elementor-revert", {
-      target: { pageId: current.id, rtl: t.rtl },
+    return this.pending(agent, project, named("elementor-revert"), {
+      resource,
+      target: {
+        pageId: current.id,
+        rtl: t.rtl,
+        ...(templates ? { templateType: current.templateType } : {}),
+      },
       before: current,
       payload,
       pageId: current.id,
@@ -2439,7 +2598,10 @@ class ElementorBuilder {
   async execute(agent, project, p, signal, dispatch) {
     if (p.kind.startsWith("elementor-globals"))
       return this.executeGlobals(agent, project, p, signal, dispatch);
-    const kind = p.kind,
+    // Theme Builder templates run through the same steps; only the route and the texts differ.
+    const templates = p.resource === "templates";
+    const route = templates ? "templates" : "pages";
+    const kind = p.kind.replace(/^elementor-template-/, "elementor-"),
       t = p.target || {};
     const creating = kind === "elementor-create";
     const stateOf = (page) => ({
@@ -2448,10 +2610,18 @@ class ElementorBuilder {
       editMode: page.editMode,
       data: canonText(parseData(page.data || "[]")),
       settings: canonText(page.pageSettings ?? null),
+      ...(templates ? { templateType: page.templateType } : {}),
     });
     let current = null;
     if (!creating) {
-      current = await this.readPage(project, t.pageId, signal);
+      current = await this.readDoc(
+        project,
+        route,
+        t.pageId,
+        signal,
+        false,
+        t.libType?.base,
+      );
       if (digest(stateOf(current)) !== digest(stateOf(p.before)))
         fail("העמוד השתנה מאז הבדיקה; יש להכין אישור חדש");
     }
@@ -2476,36 +2646,48 @@ class ElementorBuilder {
             : p.before
               ? stateOf(p.before).settings
               : undefined,
+        templateType: templates
+          ? (meta._elementor_template_type ?? p.before?.templateType)
+          : undefined,
       };
     };
-    const mismatch = (actual) => {
+    let libTermId = null;
+    const libMismatch = (actual) =>
+      libTermId && !(actual.libTerms || []).includes(libTermId)
+        ? "סוג התבנית (elementor_library_type) לא נשמר כפי שאושר"
+        : "";
+    const mismatchData = (actual) => {
       const e = expected(),
         a = stateOf(actual);
-      return ["title", "status", "editMode", "data", "settings"]
+      return ["title", "status", "editMode", "data", "settings", "templateType"]
         .filter((k) =>
           k === "title"
             ? !sameText(e[k], a[k])
-            : k === "settings"
+            : k === "settings" || k === "templateType"
               ? e[k] !== undefined && e[k] !== a[k]
               : e[k] !== a[k],
         )
         .map((k) =>
-          k === "settings"
-            ? "הגדרות העמוד שנשמרו שונות מהמאושר"
-            : k === "data"
-              ? "נתוני Elementor שנשמרו שונים מהמאושר"
-              : `${k}: צפוי ${String(e[k]).slice(0, 60)}, התקבל ${String(a[k]).slice(0, 60)}`,
+          k === "templateType"
+            ? "סוג התבנית שנשמר שונה מהמאושר"
+            : k === "settings"
+              ? "הגדרות העמוד שנשמרו שונות מהמאושר"
+              : k === "data"
+                ? "נתוני Elementor שנשמרו שונים מהמאושר"
+                : `${k}: צפוי ${String(e[k]).slice(0, 60)}, התקבל ${String(a[k]).slice(0, 60)}`,
         )
         .join("; ");
     };
+    const mismatch = (actual) =>
+      [mismatchData(actual), libMismatch(actual)].filter(Boolean).join("; ");
     const entry = {
       id: p.token,
       operation: p.token,
       at: new Date(agent.now()).toISOString(),
       site: p.site,
-      resource: "pages",
-      kind,
-      action: kind,
+      resource: p.resource || "pages",
+      kind: p.kind,
+      action: p.kind,
       pageId: t.pageId || null,
       title: p.payload.title ?? p.before?.title ?? "טיוטה חדשה",
       before: p.before
@@ -2531,16 +2713,29 @@ class ElementorBuilder {
     dispatch();
     let actual;
     try {
+      let payload = p.payload;
+      if (templates && creating && t.libType) {
+        libTermId = await this.ensureLibTerm(project, t.libType, signal);
+        payload = { ...p.payload, [t.libType.base]: [libTermId] };
+      }
       const body = await this.request(project, {
-        route: "pages",
+        route,
+        base: t.libType?.base,
         target: creating ? null : t.pageId,
         method: "POST",
-        payload: p.payload,
+        payload,
         signal,
       });
       const pageId = creating ? body?.id : t.pageId;
       if (!numericId(pageId)) fail("האתר לא החזיר מזהה לעמוד שנוצר");
-      actual = await this.readPage(project, pageId, signal);
+      actual = await this.readDoc(
+        project,
+        route,
+        pageId,
+        signal,
+        false,
+        t.libType?.base,
+      );
       const bad = mismatch(actual);
       if (bad)
         fail(
@@ -2552,7 +2747,14 @@ class ElementorBuilder {
       // ONE read-back after an ambiguous write: applied, not applied, or unknown. Never a second write.
       let seen;
       try {
-        seen = await this.readPage(project, t.pageId, signal);
+        seen = await this.readDoc(
+          project,
+          route,
+          t.pageId,
+          signal,
+          false,
+          t.libType?.base,
+        );
       } catch (readError) {
         throw Object.assign(e, {
           technical: `כתיבה: ${e.detail || "שגיאה לא מזוהה"}\nקריאה חוזרת נכשלה: ${readError.detail || "שגיאה לא מזוהה"}`,
@@ -2590,8 +2792,13 @@ class ElementorBuilder {
       written,
     });
     agent.record(p, "verified", { page: actual.id });
-    const text =
-      kind === "elementor-create"
+    const text = templates
+      ? kind === "elementor-create"
+        ? `WordPress: נוצרה טיוטת תבנית ${t.templateType || ""} של Elementor (#${actual.id}). התוכן אומת בקריאה חוזרת מהאתר.`
+        : kind === "elementor-trash"
+          ? `WordPress: טיוטת התבנית ${actual.id} הועברה לפח האשפה (Trash).`
+          : `WordPress: עודכנה תבנית Elementor ${actual.id}. התוכן אומת בקריאה חוזרת מהאתר.`
+      : kind === "elementor-create"
         ? `WordPress: נוצרה טיוטת עמוד Elementor ${actual.id}. התוכן אומת בקריאה חוזרת מהאתר.`
         : kind === "elementor-trash"
           ? `WordPress: טיוטה ${actual.id} הועברה לפח האשפה (Trash).`
@@ -2605,20 +2812,57 @@ class ElementorBuilder {
         modified: actual.modified,
       },
       elementorResult: written,
+      ...(templates
+        ? {
+            template: {
+              id: actual.id,
+              type: actual.templateType,
+              status: actual.status,
+              typeTerm: !!libTermId,
+            },
+          }
+        : {}),
       placeholders: t.placeholders || [],
       // The CSS cache cannot be cleared remotely: updates and restores tell the user what to do if styling looks stale.
-      ...(creating || kind === "elementor-trash"
-        ? {}
-        : {
-            note: (await this.clearCss(project, signal))
-              ? CSS_CLEARED
-              : CSS_NOTE,
-          }),
+      ...(templates && creating && !libTermId
+        ? { note: LIB_NOTE }
+        : creating || kind === "elementor-trash"
+          ? {}
+          : {
+              note: (await this.clearCss(project, signal))
+                ? CSS_CLEARED
+                : CSS_NOTE,
+            }),
     };
   }
 }
+Object.assign(ElementorBuilder.prototype, tpl.methods);
+Object.assign(H, {
+  fail,
+  object,
+  numericId,
+  plain,
+  link,
+  range,
+  onlyKeys,
+  checkContainer,
+  buildElementorData,
+  checkBuilt,
+  inspectExisting,
+  parseData,
+  canonText,
+  sameText,
+  outline,
+  countKinds,
+  placeholders,
+  CSS_WARN,
+  MAX_BEFORE,
+});
 module.exports = {
   ElementorBuilder,
+  TEMPLATE_TOOL: tpl.TEMPLATE_TOOL,
+  templateProps: tpl.templateProps,
+  validateTemplate: tpl.validateTemplate,
   elementorTools,
   containersSchema,
   validateElementor,
