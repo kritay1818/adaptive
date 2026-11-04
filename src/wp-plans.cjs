@@ -6,6 +6,13 @@ const { atomic } = require("./core.cjs");
 const { structureTools, digest, same, pick } = require("./wp-structure.cjs");
 const { PATTERNS, expandStep } = require("./design-kit/index.cjs");
 const { doneText } = require("./results.cjs");
+const { containersSchema, ELEMENTOR_UNDOABLE } = require("./wp-elementor.cjs");
+const { patternsSchema } = require("./elementor-kit/index.cjs");
+const { globalsSchema } = require("./elementor-globals.cjs");
+const { INFRA_UNDOABLE } = require("./wp-infra.cjs");
+const ELEMENTOR = "wp_prepare_elementor_page";
+const GLOBALS = "wp_prepare_elementor_globals";
+const TERM = "wp_prepare_term_create"; // categories/tags for a site built from a spec
 const MAX_STEPS = 40;
 const ACTIONS = [
   "wp_prepare_upload_image",
@@ -15,6 +22,9 @@ const ACTIONS = [
   "wp_prepare_create_post",
   "wp_prepare_update_page",
   "wp_prepare_update_post",
+  ELEMENTOR,
+  GLOBALS,
+  TERM,
   ...structureTools
     .filter((t) => t.name.startsWith("wp_prepare_"))
     .map((t) => t.name),
@@ -27,6 +37,9 @@ const LABELS = {
   wp_prepare_create_post: "יצירת טיוטת פוסט",
   wp_prepare_update_page: "עדכון עמוד",
   wp_prepare_update_post: "עדכון פוסט",
+  [ELEMENTOR]: "עמוד Elementor",
+  [GLOBALS]: "צבעים וגופנים גלובליים (Elementor)",
+  [TERM]: "יצירת קטגוריה/תגית",
   wp_prepare_menu: "הגדרת התפריט הראשי",
   wp_prepare_front_page: "הגדרת דף הבית",
   wp_prepare_site_css: "עיצוב האתר (CSS)",
@@ -139,6 +152,14 @@ const planTool = {
               blogdescription: str,
               css: str,
               mediaId: referenceId,
+              containers: containersSchema(referenceId),
+              patterns: patternsSchema(referenceId),
+              taxonomy: str,
+              name: str,
+              slug: str,
+              description: str,
+              globalColors: globalsSchema.globalColors,
+              globalFonts: globalsSchema.globalFonts,
               graphicId: str,
               fileId: str,
               sections: arr(
@@ -397,6 +418,7 @@ function validatePlan(args, validate) {
                 "wp_prepare_upload_user_file",
                 "wp_prepare_create_page",
                 "wp_prepare_create_post",
+                ELEMENTOR,
                 ...(template ? ["wp_prepare_menu"] : []),
               ].includes(sourceTool)
             )
@@ -419,7 +441,7 @@ function validatePlan(args, validate) {
                 sourceTool !== "wp_prepare_menu"
               )
                 error("בכותרת ובתחתית מזהה מותר רק מתפריט (ניווט)");
-            } else if (key === "mediaId") {
+            } else if (key === "mediaId" || key === "backgroundImage") {
               if (
                 v !== `{{${source}.${field}}}` ||
                 field !== "id" ||
@@ -436,7 +458,13 @@ function validatePlan(args, validate) {
               const expected = step.tool.endsWith("_post")
                 ? "wp_prepare_create_post"
                 : "wp_prepare_create_page";
-              if (sourceTool !== expected)
+              if (
+                sourceTool !== expected &&
+                !(
+                  expected === "wp_prepare_create_page" &&
+                  sourceTool === ELEMENTOR
+                )
+              )
                 error("סוג המשאב בהפניה אינו תואם לשלב");
             } else error("הפניות מותרות רק במזהים ובתוכן עמודים");
           }
@@ -444,6 +472,15 @@ function validatePlan(args, validate) {
         } else if (Array.isArray(v)) v.forEach((x) => walk(x, key));
         else if (object(v)) for (const [k, x] of Object.entries(v)) walk(x, k);
       };
+      // An Elementor update step needs a real page id: a page created earlier in the plan does not exist yet to be read.
+      if (
+        step.tool === ELEMENTOR &&
+        step.args.id !== undefined &&
+        !Number.isSafeInteger(step.args.id)
+      )
+        error(
+          "בשלב Elementor של עדכון יש לציין מזהה מספרי של עמוד קיים (לא הפניה לשלב קודם)",
+        );
       walk(step.args, "");
       validate(step.tool, replaceRefs(step.args, mock));
       if (
@@ -454,19 +491,21 @@ function validatePlan(args, validate) {
       if (step.tool === "wp_prepare_menu" && ++menus > 1)
         error("אפשר להגדיר תפריט ראשי אחד בכל תוכנית");
       const changed =
-        step.tool === "wp_prepare_front_page"
-          ? ["show_on_front", "page_on_front"]
-          : step.tool === "wp_prepare_site_identity"
-            ? Object.keys(step.args)
-            : step.tool === "wp_prepare_site_css"
-              ? ["site_css"]
-              : step.tool === "wp_prepare_site_logo"
-                ? ["site_logo"]
-                : step.tool === "wp_prepare_header"
-                  ? ["tpl_header"]
-                  : step.tool === "wp_prepare_footer"
-                    ? ["tpl_footer"]
-                    : [];
+        step.tool === GLOBALS
+          ? ["elementor_globals"]
+          : step.tool === "wp_prepare_front_page"
+            ? ["show_on_front", "page_on_front"]
+            : step.tool === "wp_prepare_site_identity"
+              ? Object.keys(step.args)
+              : step.tool === "wp_prepare_site_css"
+                ? ["site_css"]
+                : step.tool === "wp_prepare_site_logo"
+                  ? ["site_logo"]
+                  : step.tool === "wp_prepare_header"
+                    ? ["tpl_header"]
+                    : step.tool === "wp_prepare_footer"
+                      ? ["tpl_footer"]
+                      : [];
       for (const key of changed) {
         if (settings.has(key)) error("כל הגדרת אתר נכתבת פעם אחת בלבד בתוכנית");
         settings.add(key);
@@ -602,6 +641,26 @@ class BuildPlans {
             error("תוכנית מוגבלת ל־50 MB של תמונות ממתינות לאישור");
           if (videoBytes > 400 * 1024 * 1024)
             error("תוכנית מוגבלת ל־400 MB של סרטונים ממתינים לאישור");
+        } else if (definition.tool === TERM) {
+          pending = await agent.infra.prepare(
+            agent,
+            id,
+            definition.tool,
+            resolved,
+            signal,
+          );
+        } else if (
+          definition.tool === ELEMENTOR ||
+          definition.tool === GLOBALS
+        ) {
+          pending = await agent.elementor.prepare(
+            agent,
+            id,
+            definition.tool,
+            resolved,
+            signal,
+            { mockIds: new Set([...mock.values()].map((v) => v.id)) },
+          );
         } else if (structureTools.some((t) => t.name === definition.tool)) {
           pending = await agent.structure.prepare(
             agent,
@@ -673,6 +732,17 @@ class BuildPlans {
           virtual.set(`${resource}:${pageId}`, projected);
           owners.set(`${resource}:${pageId}`, definition.key);
         }
+        // A page created by an Elementor step does not exist yet either: later menu / front page steps see a projected draft.
+        if (pending.kind === "elementor-create") {
+          const pageId = mock.get(definition.key).id;
+          virtual.set(`pages:${pageId}`, {
+            id: pageId,
+            title: pending.payload.title,
+            status: "draft",
+            content: "",
+            modified: "",
+          });
+        }
       }
       signal.throwIfAborted();
       if (fingerprint !== agent.fingerprint(id))
@@ -692,7 +762,9 @@ class BuildPlans {
           key: s.definition.key,
           label: s.label,
           payload: s.definition.args,
-          before: s.pending.before,
+          before: s.pending.elementor
+            ? s.pending.preview.before
+            : s.pending.before,
           warning: s.pending.warning,
         })),
       };
@@ -731,6 +803,10 @@ class BuildPlans {
     const args = replaceRefs(step.definition.args, outputs);
     this.validate(step.definition.tool, args);
     this.agent.checkMedia(p.project, args.content, false); // videos must be files on the connected site
+    if (p.elementor) {
+      p.elementorArgs = args; // the Elementor JSON is rebuilt from the real, verified media ids just before the write
+      return p;
+    }
     if (["create", "update"].includes(p.kind)) {
       p.payload = {};
       for (const key of ["title", "content"])
@@ -776,6 +852,8 @@ class BuildPlans {
         )
           error("החיבור השתנה או כתיבות הפרויקט נחסמו");
         const p = this.compile(step, results);
+        if (p.elementor && step.definition)
+          await agent.elementor.finalize(agent, id, p, p.elementorArgs, signal);
         agent.progress?.(
           id,
           `מבצע שלב ${index + 1} מתוך ${approved.steps.length}${step.label ? " — " + step.label : ""}…`,
@@ -795,7 +873,8 @@ class BuildPlans {
         const result = await agent.executeApproved(id, p, stepSignal);
         results.set(journal.steps[index].key, result);
         journal.steps[index].state = "verified";
-        journal.steps[index].done = doneText(p, result);
+        journal.steps[index].done =
+          doneText(p, result) + (result.note ? `\n${result.note}` : "");
         this.save(id, journal);
       } catch (e) {
         const record = agent.records.find(
@@ -827,6 +906,9 @@ class BuildPlans {
       journal.error =
         "לא ניתן לשמור את סיכום התוכנית. תוצאות השלבים נשמרו ביומן הפעולות; אין ניסיון חוזר.";
     }
+    const holes = [
+      ...new Set([...results.values()].flatMap((r) => r.placeholders || [])),
+    ];
     const states = {
       verified: "הושלם ואומת",
       unknown: "תוצאה לא ידועה — יש לבדוק באתר",
@@ -834,7 +916,7 @@ class BuildPlans {
       "not-run": "לא הופעל",
     };
     return {
-      text: `${approved.kind === "undo-plan" ? "ביטול התוכנית" : "תוכנית בנייה"}: ${approved.title}\n${journal.steps.map((s, i) => `${i + 1}. ${s.label}: ${states[s.state] || s.state}`).join("\n")}\n${journal.error || "כל השלבים אומתו."}`,
+      text: `${approved.kind === "undo-plan" ? "ביטול התוכנית" : "תוכנית בנייה"}: ${approved.title}\n${journal.steps.map((s, i) => `${i + 1}. ${s.label}: ${states[s.state] || s.state}`).join("\n")}\n${journal.error || "כל השלבים אומתו."}${holes.length ? `\n⚠ מקומות להשלמה ידנית (${holes.length}): ${holes.join(" ")}` : ""}`,
       plan: journal,
     };
   }
@@ -861,7 +943,8 @@ class BuildPlans {
       token = randomUUID(),
       virtual = new Map(),
       owners = new Map(),
-      steps = [];
+      steps = [],
+      skipped = [];
     agent.pending.delete(id);
     try {
       for (const [index, entry] of rows.entries()) {
@@ -883,7 +966,22 @@ class BuildPlans {
             );
         }
         let p;
-        if (
+        if (INFRA_UNDOABLE.has(entry.action)) {
+          p = await agent.infra.prepareUndo(agent, id, entry, signal);
+          p.undoLogId = entry.id;
+          p.preview.undoLogId = entry.id;
+        } else if (ELEMENTOR_UNDOABLE.has(entry.action)) {
+          try {
+            p = await agent.elementor.prepareUndo(agent, id, entry, signal);
+          } catch (e) {
+            // Globals that were only created cannot be deleted remotely: that step is skipped and the review says so.
+            if (!e.skippable) throw e;
+            skipped.push(entry.title || "צבעים וגופנים גלובליים");
+            continue;
+          }
+          p.undoLogId = entry.id;
+          p.preview.undoLogId = entry.id;
+        } else if (
           [
             "menu",
             "front-page",
@@ -981,12 +1079,19 @@ class BuildPlans {
         undoOf: planId,
         expires: agent.now() + 5 * 60 * 1000,
         warning:
-          "ביטול השלבים שהושלמו ואומתו, בסדר הפוך. שלבים שנכשלו או שתוצאתם אינה ידועה אינם נכללים. עצירה בכשל הראשון, ללא ניסיון חוזר. מחיקת תמונות היא לצמיתות.",
+          "ביטול השלבים שהושלמו ואומתו, בסדר הפוך. שלבים שנכשלו או שתוצאתם אינה ידועה אינם נכללים. עצירה בכשל הראשון, ללא ניסיון חוזר. מחיקת תמונות היא לצמיתות." +
+          (skipped.length
+            ? ` לא ניתן לבטל מרחוק: ${skipped.join(", ")} (גלובליים שנוצרו חדשים נשארים ב־Elementor; מחקו ידנית).`
+            : ""),
         steps: steps.map((s, i) => ({
           number: i + 1,
           label: s.label,
-          payload: s.pending.payload,
-          before: s.pending.before,
+          payload: s.pending.elementor
+            ? s.pending.preview.payload
+            : s.pending.payload,
+          before: s.pending.elementor
+            ? s.pending.preview.before
+            : s.pending.before,
           warning: s.pending.warning,
         })),
       };

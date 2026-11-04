@@ -8,7 +8,10 @@ function describeError(e, { hasResume = false } = {}) {
   const status = Number(e?.status) || 0;
   let message = raw,
     buttons = [];
-  if (e?.kind === "http" || status) {
+  if (e?.kind === "html") {
+    // WordPress answered with a web page instead of JSON; status, content type and page title stay in the details.
+    buttons = ["wordpress"];
+  } else if (e?.kind === "http" || status) {
     if (
       status === 402 ||
       /credit balance|billing|insufficient[ _]?(?:quota|funds|balance|credit)|exceeded your current quota|out of credit|payment required|add credits/i.test(

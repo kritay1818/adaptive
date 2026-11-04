@@ -402,6 +402,39 @@
       }
       box.append(ol);
     }
+    // Elementor global colors and fonts: swatches (before -> after) and font names.
+    const swatches = Array.isArray(review.payload?.swatches)
+      ? review.payload.swatches
+      : [];
+    const fonts = Array.isArray(review.payload?.fonts)
+      ? review.payload.fonts
+      : [];
+    const hex = (v) => (/^#[0-9a-f]{3,8}$/i.test(String(v)) ? String(v) : "");
+    if (swatches.length || fonts.length) {
+      const list = document.createElement("ul");
+      list.className = "global-changes";
+      for (const c of swatches) {
+        const li = document.createElement("li");
+        const chip = (value) => {
+          const dot = document.createElement("span");
+          dot.className = "swatch";
+          dot.title = hex(value) || "חדש";
+          if (hex(value)) dot.style.background = hex(value);
+          return dot;
+        };
+        const label = document.createElement("span");
+        label.textContent = ` ${c.title}${c.isNew ? " (חדש)" : ""}: ${hex(c.before) || "—"} ← ${hex(c.after)} `;
+        li.append(chip(c.before), label, chip(c.after));
+        list.append(li);
+      }
+      for (const f of fonts) {
+        const li = document.createElement("li");
+        li.textContent = `גופן ${f.title}${f.isNew ? " (חדש)" : ""}: ${f.before || "—"} ← ${f.family} ${f.weight || ""}`;
+        li.dir = "ltr";
+        list.append(li);
+      }
+      box.append(list);
+    }
     return box;
   }
   function stateLine(kind) {
@@ -927,7 +960,7 @@
     stop: "עצירה",
     billing: "פתיחת עמוד החיוב",
     model: "חיבור מודל מחדש",
-    wordpress: "חיבור האתר מחדש",
+    wordpress: "חיבור אתר מחדש",
   };
   function actionButtons(ids, latest) {
     if (!latest || !ids.length) return null;
@@ -1146,7 +1179,66 @@
     c.style.height = "auto";
     c.style.height = Math.min(c.scrollHeight, 120) + "px";
   }
+  // ONE card for a project that is blocked after an unverified write: what changed, where to look, how to release, the reason.
+  function renderBlocked(info) {
+    const box = $("blocked-card");
+    if (!box) return;
+    box.replaceChildren();
+    box.hidden = !info;
+    if (!info) return;
+    const make = (tag, text, cls) => {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      e.textContent = text;
+      return e;
+    };
+    box.append(
+      make("h3", "הפרויקט חסום לכתיבה"),
+      make(
+        "p",
+        `שינוי שתוצאתו לא אומתה: ${info.what}${info.title ? ` · ${info.title}` : ""}${info.plan ? ` (תוכנית: ${info.plan})` : ""}.`,
+      ),
+      make(
+        "p",
+        "בדקו באתר אם השינוי בוצע. אפשר להמשיך לשאול ולקרוא מהאתר; כתיבה תיפתח אחרי השחרור. השחרור לא ינסה שוב את הכתיבה.",
+      ),
+    );
+    const row = document.createElement("div");
+    row.className = "action-row";
+    const view = make("button", "צפייה באתר", "view-site");
+    view.type = "button";
+    view.onclick = async () => {
+      try {
+        await api.openBlockedSite();
+      } catch (e) {
+        await notify(e.message, true);
+      }
+    };
+    const free = make("button", "בדקתי באתר — שחרור חסימה", "undo-result");
+    free.type = "button";
+    free.onclick = async () => {
+      free.disabled = true;
+      try {
+        await api.unblockWordPress();
+      } catch (e) {
+        await notify(e.message, true);
+      } finally {
+        free.disabled = false;
+      }
+    };
+    row.append(view, free);
+    box.append(row);
+    if (info.reason) {
+      const tech = document.createElement("details");
+      tech.append(make("summary", "פרטים טכניים"));
+      const pre = make("pre", info.reason);
+      pre.dir = "auto";
+      tech.append(pre);
+      box.append(tech);
+    }
+  }
   async function render(state) {
+    renderBlocked(state.blocked);
     if (current && current.id !== state.project.id) {
       attachments = [];
       unread = 0;

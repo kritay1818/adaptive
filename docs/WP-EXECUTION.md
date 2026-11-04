@@ -54,3 +54,59 @@ Official protocol references:
 - https://developer.wordpress.org/rest-api/reference/media/
 - https://developer.wordpress.org/rest-api/reference/settings/
 - https://developer.wordpress.org/rest-api/reference/users/
+
+## Elementor pages (`src/wp-elementor.cjs`)
+
+Real, Elementor-editable pages written through core REST with the Application Password: `meta._elementor_data` (JSON string),
+`_elementor_edit_mode: "builder"`, `_elementor_template_type: "wp-page"`. No plugin and no MCP (the spike showed core REST
+exposes these meta keys in Elementor 4.3.6; the MCP server exposed no Elementor abilities).
+
+- **Detection:** `wp_read_site_structure` also returns `elementor` (active, version, Pro, global colors/fonts). The agent context
+  shows it and says to build with Elementor by default when it is active. Needs Elementor 3.18+ (Flexbox containers).
+- **Tools:** `wp_read_elementor_page` (returns the simple structure) and `wp_prepare_elementor_page` (create a draft, or replace an
+  existing Elementor page). The model sends containers with widgets (heading, text-editor, image, button, spacer, divider,
+  icon-list, video); the app builds the Elementor JSON with deterministic element ids. The model never writes raw Elementor JSON.
+- **Validation (Elementor validates nothing):** allowlists for container/widget types and keys; no HTML/code/shortcode/embed
+  widgets, no scripts, no `on*` attributes; text-editor HTML goes through the page sanitizer and is limited to simple text tags;
+  links are https, root-relative, `tel:` or `mailto:`; images/videos only by `mediaId` of this site's media library; colors are
+  `#hex` or `global:<id>` (checked against the site's globals); max 150 elements, depth container > container > widget, 300 KB.
+  The built JSON is checked again against setting-key allowlists before writing.
+- **RTL:** Hebrew content or a Hebrew/Arabic site language sets right alignment and a right-start flex row on the built elements.
+- **Safety:** review card (summary + exact simple structure), one write, exact read-back of the stored `_elementor_data`
+  (normalized JSON), activity log. Undo: a created draft goes to the trash; an update restores the previous `_elementor_data`
+  byte for byte. Updates are refused when the existing page has elements the app cannot express (legacy sections, other widgets).
+- **CSS cache:** Elementor offers no documented remote way to clear it, so the app does not; update and restore results tell the
+  user to use Elementor > Tools > Regenerate CSS & Data if the styling looks stale.
+- **Build plans:** `wp_prepare_elementor_page` is a plan step; `mediaId` may be a `{{key.id}}` reference to an earlier upload
+  (the JSON is rebuilt from the verified id just before the write). An update step needs a real numeric page id. Plan undo
+  trashes the created draft / restores the previous data.
+
+### Elementor: kit, globals, video, CSS cache, header/footer, spec flow
+
+- **Design kit (`src/elementor-kit/`):** ten patterns (hero-image, hero-simple, text-image, services-cards, features-list,
+  testimonials, cta-band, contact-details, faq, footer-section). A pattern turns simple data into the same simple container
+  structure as free-form input, so it passes the normal validator and builder. Global colors/fonts are referenced
+  (`global:primary`...); a site that cannot offer globals gets a hex palette. The builder adds mobile settings to every container
+  (rows stack, paddings/gaps shrink, cards full width, big titles smaller) and RTL alignment for Hebrew.
+- **Globals (`wp_read_elementor_globals`, `wp_prepare_elementor_globals`):** Elementor's own routes
+  `/elementor/v1/globals/colors|typography` (undocumented; version and route are checked first). Review card with swatches and font
+  names, one write per item, exact read-back, undo restores existing values; new custom globals cannot be deleted remotely.
+  Fonts: curated Google Fonts list (all Hebrew-capable ones included) plus Elementor system fonts.
+- **Video widget:** `mediaId` (library file) or a YouTube/Vimeo `url` (https, known host, validated id, no other parameters);
+  no HTML/embed widgets.
+- **CSS cache:** after a VERIFIED update, restore or globals change the app sends `DELETE /elementor/v1/cache` (undocumented,
+  administrator only, idempotent). It is announced on the review card, never fails the write, and the manual
+  "Regenerate CSS & Data" note stays as the fallback.
+- **Header/footer (Theme Builder):** NOT written. `elementor_library` is exposed over REST, but the display conditions
+  (`_elementor_conditions`) are not exposed meta and Elementor Pro keeps a conditions cache in an option that REST cannot clear.
+  The agent is told (HEADER/FOOTER line) to explain this in Hebrew and keep the theme's own header/footer.
+- **Spec flow:** see `src/elementor-instructions.cjs`. Missing facts are written `(להשלים: ...)` and listed in the review and the
+  final result.
+
+### Provider switching, rejected key, blocked project
+
+- History is provider-neutral; a provider's own `native` turn is echoed only to the provider that produced it (`nativeKind`), any
+  other provider gets the turn rebuilt from the neutral calls (tests: every provider pair).
+- A key the provider rejects (401) is remembered; no request is sent with it until a different key is connected.
+- A blocked project shows ONE card (change, view, release, technical reason). Reads and questions still work; write preparations
+  get a short tool error instead of a long message.

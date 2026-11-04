@@ -4,7 +4,12 @@
 // Every write is a normal reviewed write: review card, exact read-back verification, activity log entry and undo. Reads and
 // writes go through ONE request function that allows only these REST routes on the connected site (no generic HTTP).
 const { randomUUID, createHash } = require("node:crypto");
-const { siteURL, networkFailure } = require("./wordpress.cjs");
+const {
+  siteURL,
+  networkFailure,
+  htmlResponse,
+  HTML_TYPE,
+} = require("./wordpress.cjs");
 const { normSame, sameText, mismatchDetail } = require("./diff.cjs");
 const { safeHTML } = require("./wp-content.cjs");
 const INFRA_LIMIT = 2 * 1024 * 1024;
@@ -612,10 +617,11 @@ class SiteInfra {
         maxBytes: INFRA_LIMIT,
       });
       combined.throwIfAborted();
+      if (HTML_TYPE.test(response.contentType || ""))
+        throw htmlResponse(response);
       if (
         typeof response.body !== "string" ||
-        Buffer.byteLength(response.body) > INFRA_LIMIT ||
-        /^(?:text\/html|application\/xhtml)/i.test(response.contentType || "")
+        Buffer.byteLength(response.body) > INFRA_LIMIT
       )
         throw Error("html");
       data = response.body ? JSON.parse(response.body) : null;
@@ -628,7 +634,7 @@ class SiteInfra {
         signal,
         limit: INFRA_LIMIT,
       });
-      if (!error.notApplied)
+      if (!error.notApplied && error.kind !== "html")
         error.message = write
           ? "תוצאת השינוי באתר אינה ידועה; אין ניסיון חוזר אוטומטי."
           : "קריאת המידע מהאתר נכשלה (רשת, הרשאות או REST API לא נתמך).";

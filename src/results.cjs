@@ -21,7 +21,18 @@ function doneText(p, result = {}) {
     case "update":
       return `${post ? "הפוסט עודכן" : "העמוד עודכן"}: ${quote(title)}`;
     case "trash":
+    case "elementor-trash":
       return `${quote(title)} הועבר לפח`;
+    case "elementor-create":
+      return `נוצרה טיוטת עמוד Elementor: ${quote(title)}`;
+    case "elementor-update":
+      return `עמוד Elementor עודכן: ${quote(title)}`;
+    case "elementor-globals":
+      return "הצבעים והגופנים הגלובליים של Elementor עודכנו";
+    case "elementor-globals-revert":
+      return "הצבעים והגופנים הגלובליים הקודמים שוחזרו";
+    case "elementor-revert":
+      return `תוכן Elementor הקודם של ${quote(title)} שוחזר`;
     case "publish":
       return `${quote(title)} פורסם לציבור`;
     case "unpublish":
@@ -77,7 +88,13 @@ function viewTarget(rows) {
   const verified = rows.filter((r) => r && r.state === "verified");
   const page = verified.find(
     (r) =>
-      ["create", "update", "publish"].includes(r.kind) &&
+      [
+        "create",
+        "update",
+        "publish",
+        "elementor-create",
+        "elementor-update",
+      ].includes(r.kind) &&
       ["pages", "posts"].includes(r.resource) &&
       Number.isSafeInteger(r.page) &&
       r.page > 0,
@@ -94,4 +111,34 @@ function viewTarget(rows) {
   return media ? { type: "media", id: media.page } : null;
 }
 
-module.exports = { doneText, viewTarget };
+// What a (possibly unverified) operation was, in plain Hebrew, for the "project is blocked" card.
+const KIND_LABELS = {
+  create: "יצירת טיוטה",
+  update: "עדכון עמוד",
+  publish: "פרסום לציבור",
+  unpublish: "החזרה לטיוטה",
+  trash: "העברה לפח",
+  upload: "העלאת מדיה",
+  "delete-media": "מחיקת מדיה",
+  menu: "עדכון התפריט הראשי",
+  "front-page": "הגדרת דף הבית",
+  "site-identity": "עדכון שם האתר ותיאורו",
+  "site-css": "עדכון עיצוב האתר (CSS)",
+  "site-logo": "הגדרת הלוגו",
+  header: "עדכון הכותרת העליונה",
+  footer: "עדכון התחתית",
+  "elementor-create": "יצירת עמוד Elementor",
+  "elementor-update": "עדכון עמוד Elementor",
+  "elementor-globals": "עדכון צבעים וגופנים גלובליים",
+  "build-plan": "תוכנית בנייה",
+};
+const kindLabel = (kind) =>
+  KIND_LABELS[kind] ||
+  (String(kind || "").startsWith("term-")
+    ? "שינוי קטגוריה/תגית"
+    : String(kind || "").startsWith("item-")
+      ? "שינוי פריט תוכן"
+      : String(kind || "").startsWith("plugin-")
+        ? "שינוי תוסף"
+        : "שינוי באתר");
+module.exports = { doneText, viewTarget, kindLabel };

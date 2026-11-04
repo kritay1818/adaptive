@@ -274,6 +274,7 @@ function state(id) {
         : provider.status(),
     backend,
     wordpress: wordpress.status(id || store.list()[0].id),
+    blocked: agent.blockedInfo(id || store.list()[0].id),
   };
 }
 function projectState(id) {
@@ -712,21 +713,49 @@ if (!app.requestSingleInstanceLock()) {
           inFlight.delete(id);
         }
       });
-      handle("unblockWordPress", ["history"], async () => {
+      // The "project is blocked" card (chat window and small bar): open where the unverified change would be.
+      handle("openBlockedSite", ["index", "history"], async () => {
+        const id = activeProject;
+        const info = agent.blockedInfo(id);
+        const site = wordpress.status(id).site;
+        if (!info || !site) throw new Error("אין מה לפתוח");
+        const base = new URL(site.endsWith("/") ? site : site + "/");
+        if (base.protocol !== "https:")
+          throw new Error("כתובת האתר אינה מאובטחת");
+        let url;
+        if (Number.isSafeInteger(info.page) && info.page > 0) {
+          url = new URL(base.href);
+          url.searchParams.set(
+            info.resource === "posts" ? "p" : "page_id",
+            String(info.page),
+          );
+          url.searchParams.set("preview", "true");
+        } else if (["create", "elementor-create"].includes(info.kind))
+          url = new URL("wp-admin/edit.php?post_type=page", base);
+        else if (info.kind === "upload")
+          url = new URL("wp-admin/upload.php", base);
+        else url = base;
+        await shell.openExternal(url.href);
+        return true;
+      });
+      handle("unblockWordPress", ["index", "history"], async () => {
         const id = activeProject;
         if (connecting || inFlight.size) throw new Error("פעולה עדיין מתבצעת");
         inFlight.add(id);
         try {
-          const confirmation = await dialog.showMessageBox(historyWindow, {
-            type: "warning",
-            title: "שחרור חסימת כתיבה",
-            message: "בדקתי באתר — שחרור חסימה",
-            detail: `האם בדקת באתר את תוצאת הפעולה עבור הפרויקט ״${store.get(id).name}״? שחרור החסימה לא ינסה שוב את הכתיבה.`,
-            buttons: ["ביטול", "שחרור חסימה"],
-            defaultId: 0,
-            cancelId: 0,
-            noLink: true,
-          });
+          const confirmation = await dialog.showMessageBox(
+            historyWindow?.isVisible() ? historyWindow : sidebar,
+            {
+              type: "warning",
+              title: "שחרור חסימת כתיבה",
+              message: "בדקתי באתר — שחרור חסימה",
+              detail: `האם בדקת באתר את תוצאת הפעולה עבור הפרויקט ״${store.get(id).name}״? שחרור החסימה לא ינסה שוב את הכתיבה.`,
+              buttons: ["ביטול", "שחרור חסימה"],
+              defaultId: 0,
+              cancelId: 0,
+              noLink: true,
+            },
+          );
           if (activeProject !== id)
             throw new Error("הפרויקט השתנה; החסימה לא שוחררה");
           if (confirmation.response === 1) agent.unblock(id);

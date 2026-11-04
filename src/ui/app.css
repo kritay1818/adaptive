@@ -2050,3 +2050,49 @@ body:not(.history-window) #notice[role="alert"] {
   font-size: 11px;
   color: var(--ad-text-2);
 }
+
+.global-changes {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  font-size: 12px;
+}
+.global-changes li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 0;
+}
+.swatch {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid var(--ad-line);
+  background: repeating-linear-gradient(45deg, #888 0 4px, #bbb 4px 8px);
+}
+
+.blocked-card {
+  margin: 6px 12px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--ad-text);
+  background: var(--ad-surface-2);
+  border: 1px solid #c0562f;
+  border-radius: 8px;
+}
+.blocked-card[hidden] {
+  display: none;
+}
+.blocked-card h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+.blocked-card p {
+  margin: 4px 0;
+}
+.blocked-card pre {
+  white-space: pre-wrap;
+  font-size: 11px;
+  color: var(--ad-text-2);
+}

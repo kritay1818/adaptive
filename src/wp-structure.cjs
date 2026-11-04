@@ -1,6 +1,11 @@
 "use strict";
 const { randomUUID, createHash } = require("node:crypto");
-const { siteURL, networkFailure } = require("./wordpress.cjs");
+const {
+  siteURL,
+  networkFailure,
+  htmlResponse,
+  HTML_TYPE,
+} = require("./wordpress.cjs");
 const STRUCTURE_LIMIT = 2 * 1024 * 1024; // global styles / template parts can be large
 const { text } = require("./core.cjs");
 const { normSame, sameText, mismatchDetail } = require("./diff.cjs");
@@ -450,10 +455,11 @@ class SiteStructure {
         maxBytes: STRUCTURE_LIMIT,
       });
       combined.throwIfAborted();
+      if (HTML_TYPE.test(response.contentType || ""))
+        throw htmlResponse(response);
       if (
         typeof response.body !== "string" ||
-        Buffer.byteLength(response.body) > STRUCTURE_LIMIT ||
-        /^(?:text\/html|application\/xhtml)/i.test(response.contentType || "")
+        Buffer.byteLength(response.body) > STRUCTURE_LIMIT
       )
         throw Error("response");
       const data = JSON.parse(response.body);
@@ -481,7 +487,7 @@ class SiteStructure {
         signal,
         limit: STRUCTURE_LIMIT,
       });
-      if (!error.notApplied)
+      if (!error.notApplied && error.kind !== "html")
         error.message = write
           ? "תוצאת שינוי מבנה האתר אינה ידועה; אין ניסיון חוזר אוטומטי."
           : "קריאת מבנה האתר נכשלה (הרשאות, רשת או REST API לא נתמך).";

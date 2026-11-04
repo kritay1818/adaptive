@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld(
     undoWordPress: (fields) => call("undoWordPress", fields),
     undoWordPressPlan: (planId) => call("undoWordPressPlan", { planId }),
     unblockWordPress: () => call("unblockWordPress"),
+    openBlockedSite: () => call("openBlockedSite"),
     messageAction: (fields) => call("messageAction", fields),
     onAttached: (callback) => {
       const listener = (_e, value) => callback(value);

@@ -229,7 +229,9 @@ test("unknown upload is logged, blocks just that project, and never retries", as
   assert.equal(row.action, "upload");
   assert.equal(row.state, "unknown");
   assert.equal(row.canUndo, false);
-  await assert.rejects(prepare(agent));
+  // Blocked: the upload is not prepared (the run answers with the short pointer instead of failing) and nothing is written.
+  assert.equal((await prepare(agent)).review, undefined);
+  assert.equal(agent.review("p"), null);
   assert.equal(writes(calls).length, 1);
 });
 

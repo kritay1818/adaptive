@@ -139,6 +139,31 @@ class Provider {
   active() {
     return this.saved.records[this.saved.active?.slot];
   }
+  // A key the provider rejected (401) is remembered (by its stored, encrypted form) so no further request is sent with it until a
+  // different key is connected. This stops repeated failing requests and repeated errors; one card tells the user what to do.
+  noteRejected(r, e) {
+    if (
+      r &&
+      (e?.status === 401 ||
+        (e?.status === 403 &&
+          /api[ _-]?key|authenticat|unauthori[sz]ed/i.test(
+            String(e?.detail || ""),
+          )))
+    )
+      this.rejectedKey = r.encrypted;
+  }
+  guardRejected(r) {
+    if (r && this.rejectedKey && this.rejectedKey === r.encrypted)
+      throw Object.assign(
+        new Error("מפתח ה-API נדחה בבקשה קודמת. חברו מודל מחדש כדי להמשיך."),
+        {
+          kind: "http",
+          status: 401,
+          detail: "המפתח נדחה בבקשה קודמת; לא נשלחה בקשה חדשה עם אותו מפתח.",
+          rejectedBefore: true,
+        },
+      );
+  }
   status() {
     const r = this.active();
     let connected = !!r && this.secure() && !this.loadError;
@@ -151,6 +176,7 @@ class Provider {
     }
     return {
       connected,
+      keyRejected: !!(connected && this.rejectedKey === r.encrypted),
       provider: connected ? adapter(r.provider, r.region).label : null,
       providerId: connected ? r.provider : null,
       region: connected ? r.region : null,
@@ -486,6 +512,7 @@ class Provider {
     this.guard();
     const r = this.active();
     if (!r) throw new Error("אין מודל מחובר");
+    this.guardRejected(r);
     this.busy = true;
     try {
       return await this.toolRequest(
@@ -498,6 +525,7 @@ class Provider {
         300000,
       );
     } catch (e) {
+      this.noteRejected(r, e);
       throw visionError(messages, e);
     } finally {
       this.busy = false;
@@ -507,6 +535,7 @@ class Provider {
     this.guard();
     const r = this.active();
     if (!r) throw new Error("אין מודל מחובר. חברו ספק כדי להתחיל.");
+    this.guardRejected(r);
     this.busy = true;
     try {
       return await this.request(
@@ -518,6 +547,7 @@ class Provider {
         r.region,
       );
     } catch (e) {
+      this.noteRejected(r, e);
       throw visionError(messages, e);
     } finally {
       this.busy = false;

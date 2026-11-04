@@ -4,11 +4,16 @@ const { imageURL } = require("./wordpress.cjs");
 const { planTool } = require("./wp-plans.cjs");
 const PASS_PAGES = 5,
   TOTAL_PAGES = 20;
+// A source page becomes a block page, or (Elementor active) an Elementor page built from the kit patterns.
+const ELEMENTOR_PAGE = "wp_prepare_elementor_page";
+const isPageStep = (s) =>
+  s?.tool === "wp_prepare_create_page" || s?.tool === ELEMENTOR_PAGE;
 const IMPORT_STEPS = [
   "wp_prepare_site_css",
   "wp_prepare_upload_image",
   "wp_prepare_upload_scan_graphic",
   "wp_prepare_create_page",
+  ELEMENTOR_PAGE,
   "wp_prepare_menu",
   "wp_prepare_site_logo",
   "wp_prepare_site_identity",
@@ -24,6 +29,7 @@ const RANK = {
   wp_prepare_site_logo: 1,
   wp_prepare_site_identity: 1,
   wp_prepare_create_page: 2,
+  [ELEMENTOR_PAGE]: 2,
   wp_prepare_menu: 3,
   wp_prepare_header: 4,
   wp_prepare_footer: 5,
@@ -53,6 +59,8 @@ function checkImportOrder(steps) {
       throw Error(
         "ייבוא מאפשר רק CSS, לוגו, תמונות, עמודי טיוטה, תפריט, כותרת, תחתית, שם האתר ודף בית",
       );
+    if (s.tool === ELEMENTOR_PAGE && s.args?.id !== undefined)
+      throw Error("בייבוא נוצרים עמודים חדשים בלבד: אין לעדכן עמוד קיים");
     if (!FREE.has(s.tool)) {
       if (rank < last)
         throw Error(
@@ -112,7 +120,7 @@ const importTools = [
   {
     name: "wp_prepare_site_import",
     description:
-      "Prepare a draft-only import from a previously rendered sourceToken for this project/site. Reconstruct the observed content/design with allowed core Gutenberg blocks, never copy executable source HTML. Supply ordered build-plan steps ONLY wp_prepare_upload_image and wp_prepare_create_page (max 40). Upload URLs must come from the read source images; use verified {{image.id}}/{{image.url}} references. Only when the read result has menuRequired (final pass of every import, including a single-pass import), end the plan with exactly one wp_prepare_menu step linking every page in previousImportedPages by numeric id plus every page created in this plan via {{key.id}}. Never publish, change settings, or update existing pages during import. Human approval, exact verification, activity log and reverse undo use the existing build-plan flow.",
+      "Prepare a draft-only import from a previously rendered sourceToken for this project/site. Reconstruct the observed content/design with allowed core Gutenberg blocks, never copy executable source HTML. Supply ordered build-plan steps ONLY wp_prepare_upload_image and the page step (max 40): with Elementor active (see the Elementor line of the context) the page step is wp_prepare_elementor_page with kit patterns (patterns:[{pattern,data}], source sections mapped to hero-image/hero-simple/text-image/services-cards/features-list/testimonials/cta-band/contact-details/faq/footer-section, uploaded images referenced as mediaId {{key.id}}), otherwise wp_prepare_create_page. Upload URLs must come from the read source images; use verified {{image.id}}/{{image.url}} references. Only when the read result has menuRequired (final pass of every import, including a single-pass import), end the plan with exactly one wp_prepare_menu step linking every page in previousImportedPages by numeric id plus every page created in this plan via {{key.id}}. Never publish, change settings, or update existing pages during import. Human approval, exact verification, activity log and reverse undo use the existing build-plan flow.",
     parameters: {
       ...planTool.parameters,
       properties: {
@@ -168,7 +176,7 @@ function validateImport(name, args) {
       !args.steps.length ||
       args.steps.length > 40 ||
       args.steps.some((s) => !s || !IMPORT_STEPS.includes(s.tool)) ||
-      !args.steps.some((s) => s.tool === "wp_prepare_create_page")
+      !args.steps.some(isPageStep)
     ) {
       throw Error(
         "ייבוא מאפשר רק העלאת תמונות ויצירת עמודי טיוטה, עד 40 שלבים",
@@ -529,9 +537,7 @@ class SiteImporter {
         );
       const expected = new Set([
         ...source.menuPages.map((p) => p.id),
-        ...args.steps
-          .filter((s) => s.tool === "wp_prepare_create_page")
-          .map((s) => `{{${s.key}.id}}`),
+        ...args.steps.filter(isPageStep).map((s) => `{{${s.key}.id}}`),
       ]);
       const linked = Array.isArray(menu.args?.links)
         ? menu.args.links.map((l) => l?.pageId)

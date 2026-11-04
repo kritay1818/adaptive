@@ -184,6 +184,15 @@ function toolGeneration(a, model, messages, tools, maxTokens) {
     ),
   );
   const turns = messages.filter((m) => m.role !== "system");
+  // The history is provider-neutral (text, images, neutral tool calls and results). A provider's own "native" turn is echoed only
+  // back to that same provider; for any other provider the assistant turn is rebuilt from the neutral calls, so a project that
+  // started with one provider keeps working after switching to another.
+  const own = (m) =>
+    m.native !== undefined &&
+    (m.nativeKind === undefined || m.nativeKind === a.kind)
+      ? m.native
+      : undefined;
+  const calls = (m) => (Array.isArray(m.calls) ? m.calls : []);
   if (a.kind === "gemini") {
     spec.body.contents = turns.map((m) =>
       m.role === "tool"
@@ -199,10 +208,19 @@ function toolGeneration(a, model, messages, tools, maxTokens) {
               },
             ],
           }
-        : m.native || {
+        : (own(m) ?? {
             role: m.role === "assistant" ? "model" : "user",
-            parts: turnContent(a, m),
-          },
+            parts: [
+              ...turnContent(a, m).filter((p) => p.text !== ""),
+              ...calls(m).map((c) => ({
+                functionCall: {
+                  name: c.name,
+                  args: c.args ?? {},
+                  ...(c.nativeId ? { id: c.nativeId } : {}),
+                },
+              })),
+            ],
+          }),
     );
     // Let the model call tools right away (no "ANY"/"NONE" forcing).
     if (tools.length)
@@ -235,7 +253,24 @@ function toolGeneration(a, model, messages, tools, maxTokens) {
                 },
               ],
             }
-          : { role: m.role, content: m.native || turnContent(a, m) };
+          : {
+              role: m.role,
+              content:
+                own(m) ??
+                (calls(m).length
+                  ? [
+                      ...(m.content
+                        ? [{ type: "text", text: String(m.content) }]
+                        : []),
+                      ...calls(m).map((c) => ({
+                        type: "tool_use",
+                        id: c.id,
+                        name: c.name,
+                        input: c.args ?? {},
+                      })),
+                    ]
+                  : turnContent(a, m)),
+            };
       // Parallel tool results belong to a single user turn in the Messages protocol.
       if (
         m.role === "tool" &&
@@ -288,7 +323,7 @@ function toolGeneration(a, model, messages, tools, maxTokens) {
           output: JSON.stringify(m.result),
         });
       else if (m.role === "assistant") {
-        if (Array.isArray(m.native)) input.push(...m.native);
+        if (Array.isArray(own(m))) input.push(...own(m));
         else {
           if (m.content) input.push({ role: "assistant", content: m.content });
           for (const c of m.calls || [])
@@ -329,7 +364,22 @@ function toolGeneration(a, model, messages, tools, maxTokens) {
             tool_call_id: m.call.id,
             content: JSON.stringify(m.result),
           }
-        : m.native || { role: m.role, content: turnContent(a, m) },
+        : (own(m) ?? {
+            role: m.role,
+            content: turnContent(a, m),
+            ...(m.role === "assistant" && calls(m).length
+              ? {
+                  tool_calls: calls(m).map((c) => ({
+                    id: c.id,
+                    type: "function",
+                    function: {
+                      name: c.name,
+                      arguments: JSON.stringify(c.args ?? {}),
+                    },
+                  })),
+                }
+              : {}),
+          }),
     );
     if (tools.length) {
       spec.body.tools = tools.map((t) => ({ type: "function", function: t }));
@@ -410,7 +460,14 @@ function toolOutput(a, result) {
           : !!native?.tool_calls?.length;
   // Cut-off tool arguments are incomplete, not a malformed call: never parse or run them.
   if (cut && pending)
-    return { text: "", calls: [], native, truncated: true, usage: null };
+    return {
+      text: "",
+      calls: [],
+      native,
+      nativeKind: a.kind,
+      truncated: true,
+      usage: null,
+    };
   let calls;
   if (a.kind === "gemini")
     calls = (native?.parts || [])
@@ -531,6 +588,7 @@ function toolOutput(a, result) {
     text: text(content, 100000),
     calls,
     native,
+    nativeKind: a.kind,
     usage,
     ...(invalid ? { invalid } : {}),
   };

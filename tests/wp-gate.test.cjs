@@ -163,8 +163,13 @@ test("transport unknown outcome never retries and blocks duplicate/restarted wri
       !first.text.includes("PRIVATE") && /אין ניסיון חוזר/.test(first.text),
     );
     await assert.rejects(f.agent.decide("p", r.review.token, true));
-    await assert.rejects(f.agent.run("p", [], proposal()));
-    await assert.rejects(new Agent(f.wp, f.dir).run("p", [], proposal()));
+    // While blocked a write preparation is answered with the short pointer (the run itself does not fail, so reads still work)
+    // and nothing is prepared or written, also after a restart.
+    for (const agent of [f.agent, new Agent(f.wp, f.dir)]) {
+      const blocked = await agent.run("p", [], proposal());
+      assert.equal(blocked.review, undefined);
+      assert.equal(agent.review("p"), null);
+    }
     assert.equal(requests, 1);
     assert.ok(!fs.readFileSync(f.agent.file, "utf8").includes("PRIVATE"));
   } finally {

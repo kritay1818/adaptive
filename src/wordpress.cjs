@@ -436,6 +436,29 @@ function mediaSummary(m) {
     modified: typeof m.modified === "string" ? m.modified.slice(0, 40) : "",
   };
 }
+// A WordPress route that answered with a web page instead of JSON (site deleted/expired, maintenance, login or firewall page).
+// Only fixed, sanitized facts are kept: status code, content type and the page title (plain text, short).
+const HTML_TYPE = /^(?:text\/html|application\/xhtml)/i;
+const HTML_MESSAGE =
+  "האתר לא החזיר תשובה תקינה — ייתכן שהאתר נמחק, לא זמין או חוסם גישה. בדקו שהכתובת נפתחת בדפדפן";
+function htmlResponse(response) {
+  const body = typeof response?.body === "string" ? response.body : "";
+  const m = /<title[^>]*>([\s\S]{0,400}?)<\/title>/i.exec(body.slice(0, 20000));
+  const title = m
+    ? m[1]
+        .replace(/<[^>]*>/g, " ")
+        .replace(/[\x00-\x1f\x7f<>]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 80)
+    : "";
+  const contentType = String(response?.contentType || "")
+    .replace(/[\x00-\x1f\x7f]/g, "")
+    .slice(0, 80);
+  return Object.assign(new Error("html"), {
+    htmlInfo: { status: Number(response?.status) || 0, contentType, title },
+  });
+}
 // One place that turns any failure of a WordPress request into a Hebrew error with a SPECIFIC technical reason (error.detail):
 // timeout (seconds + phase: connecting / sending / waiting / reading), HTTP status, response too large, invalid JSON,
 // network error code. A certificate error is its own clear message. A request that never left the machine (connection or TLS
@@ -449,7 +472,10 @@ function networkFailure(e, { write, timeoutMs, deadline, signal, limit }) {
   });
   let reason = c.reason;
   if (/^status:(\d+)$/.test(m)) reason = `האתר החזיר סטטוס HTTP ${m.slice(7)}`;
-  else if (m === "html") reason = "האתר החזיר דף HTML במקום JSON";
+  else if (m === "html")
+    reason = e.htmlInfo
+      ? `האתר החזיר דף HTML במקום JSON — סטטוס HTTP: ${e.htmlInfo.status || "לא ידוע"}; סוג תוכן: ${e.htmlInfo.contentType || "לא ידוע"}; כותרת הדף: ${e.htmlInfo.title || "(ללא)"}`
+      : "האתר החזיר דף HTML במקום JSON";
   else if (m === "response")
     reason = "תשובת האתר אינה תקינה (סטטוס או סוג תוכן לא צפויים)";
   else if (m === "body") reason = "התשובה ריקה או אינה טקסט";
@@ -475,6 +501,10 @@ function networkFailure(e, { write, timeoutMs, deadline, signal, limit }) {
   );
   error.detail = reason;
   error.kind = c.kind;
+  if (m === "html") {
+    error.kind = "html";
+    error.message = HTML_MESSAGE;
+  }
   error.phase = c.phase;
   error.code = c.code;
   if (notSent) Object.assign(error, { notApplied: true, notSent: true });
@@ -691,8 +721,7 @@ class WordPress {
       if (typeof result.body !== "string") throw new Error("body");
       if (Buffer.byteLength(result.body) > PAGE_RESPONSE_LIMIT)
         throw new Error("size");
-      if (/^(?:text\/html|application\/xhtml)/i.test(result.contentType || ""))
-        throw new Error("html");
+      if (HTML_TYPE.test(result.contentType || "")) throw htmlResponse(result);
       return JSON.parse(result.body);
     } catch (e) {
       // Never reflect server payloads, Authorization or credentials; only a fixed technical reason is kept.
@@ -892,10 +921,10 @@ class WordPress {
           { notApplied: true, refused: true },
         );
       }
+      if (HTML_TYPE.test(result.contentType || "")) throw htmlResponse(result);
       if (
         typeof result.body !== "string" ||
-        Buffer.byteLength(result.body) > 262144 ||
-        /^(?:text\/html|application\/xhtml)/i.test(result.contentType || "")
+        Buffer.byteLength(result.body) > 262144
       )
         throw new Error("response");
       const data = JSON.parse(result.body);
@@ -924,7 +953,7 @@ class WordPress {
         deadline,
         signal,
       });
-      if (!error.notApplied)
+      if (!error.notApplied && error.kind !== "html")
         error.message =
           method === "GET"
             ? "קריאת המדיה נכשלה; אין אימות לתוצאה."
@@ -1127,5 +1156,7 @@ module.exports = {
   mediaType,
   mediaFields,
   networkFailure,
+  htmlResponse,
+  HTML_TYPE,
   tlsCA,
 };
