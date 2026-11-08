@@ -8,6 +8,7 @@ const {
   siteURL,
   networkFailure,
   htmlResponse,
+  parseJson,
   HTML_TYPE,
 } = require("./wordpress.cjs");
 const { normSame, sameText, mismatchDetail } = require("./diff.cjs");
@@ -644,7 +645,7 @@ class SiteInfra {
         Buffer.byteLength(response.body) > INFRA_LIMIT
       )
         throw Error("html");
-      data = response.body ? JSON.parse(response.body) : null;
+      data = response.body ? parseJson(response) : null;
     } catch (e) {
       if (e?.infra) throw e;
       const error = networkFailure(e, {
@@ -654,7 +655,9 @@ class SiteInfra {
         signal,
         limit: INFRA_LIMIT,
       });
-      if (!error.notApplied && error.kind !== "html")
+      if (error.kind === "html") {
+        /* message set by networkFailure */
+      } else if (!error.notApplied)
         error.message = write
           ? "תוצאת השינוי באתר אינה ידועה; אין ניסיון חוזר אוטומטי."
           : "קריאת המידע מהאתר נכשלה (רשת, הרשאות או REST API לא נתמך).";
@@ -675,9 +678,8 @@ class SiteInfra {
     if (![200, 201].includes(status))
       throw this.httpFailure(status, data, write, route);
     if (!data || typeof data !== "object") {
-      const error = Object.assign(new Error("תשובת האתר אינה תקינה"), {
-        detail: "response",
-      });
+      // An empty or non-object answer to a request that should return JSON: the same friendly error.
+      const error = networkFailure(htmlResponse(response), { write });
       if (write) error.ambiguousWrite = true;
       throw error;
     }

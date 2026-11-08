@@ -4,6 +4,7 @@ const {
   siteURL,
   networkFailure,
   htmlResponse,
+  parseJson,
   HTML_TYPE,
 } = require("./wordpress.cjs");
 const STRUCTURE_LIMIT = 2 * 1024 * 1024; // global styles / template parts can be large
@@ -462,7 +463,7 @@ class SiteStructure {
         Buffer.byteLength(response.body) > STRUCTURE_LIMIT
       )
         throw Error("response");
-      const data = JSON.parse(response.body);
+      const data = parseJson(response);
       if (
         missing &&
         method === "GET" &&
@@ -487,7 +488,10 @@ class SiteStructure {
         signal,
         limit: STRUCTURE_LIMIT,
       });
-      if (!error.notApplied && error.kind !== "html")
+      // An HTML / non-JSON answer keeps its own specific message (and the reconnect button).
+      if (error.kind === "html") {
+        /* message set by networkFailure */
+      } else if (!error.notApplied)
         error.message = write
           ? "תוצאת שינוי מבנה האתר אינה ידועה; אין ניסיון חוזר אוטומטי."
           : "קריאת מבנה האתר נכשלה (הרשאות, רשת או REST API לא נתמך).";

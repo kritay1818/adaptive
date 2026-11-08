@@ -8,6 +8,7 @@ const {
   siteURL,
   networkFailure,
   htmlResponse,
+  parseJson,
   HTML_TYPE,
 } = require("./wordpress.cjs");
 const { sameText } = require("./diff.cjs");
@@ -38,6 +39,18 @@ const MAX_DATA = 300 * 1024; // size cap of the _elementor_data we write
 const MAX_BEFORE = 400 * 1024; // larger existing pages cannot be kept for undo, so they are not updated
 const MAX_ELEMENTS = 150;
 const MOCK_HOST = "plan-reference.invalid";
+// Page layout (the WordPress page template). "רוחב מלא" = Elementor Full Width (elementor_header_footer).
+const PAGE_TEMPLATES = Object.freeze({
+  default: "",
+  "full-width": "elementor_header_footer",
+  canvas: "elementor_canvas",
+});
+const templateLabel = (value) =>
+  ({
+    "": "ברירת המחדל של ערכת העיצוב",
+    elementor_header_footer: "Elementor רוחב מלא (Elementor Full Width)",
+    elementor_canvas: "Elementor Canvas (בד ריק, בלי כותרת ותחתית)",
+  })[value ?? ""] || String(value).slice(0, 60);
 const MIN_VERSION = "3.18.0"; // Flexbox containers are on by default from here
 const digest = (v) =>
   createHash("sha256").update(JSON.stringify(v)).digest("hex");
@@ -220,6 +233,12 @@ const elementorTools = [
       {
         id: { type: "integer" },
         title: str,
+        pageTemplate: {
+          type: "string",
+          enum: Object.keys(PAGE_TEMPLATES),
+          description:
+            "Page layout: full-width = Elementor Full Width (elementor_header_footer, what 'רוחב מלא' means), canvas = Elementor Canvas, default = the theme's",
+        },
         patterns: patternsSchema({ type: "integer" }),
         containers: containersSchema({ type: "integer" }),
       },
@@ -558,7 +577,16 @@ function validateElementor(name, args, opts = {}) {
   if (name === edit.EDIT_TOOL) return edit.validateEdit(args);
   if (name === edit.DUP_TOOL) return edit.validateDuplicate(args);
   if (name !== TOOL) fail("כלי Elementor לא מוכר");
-  onlyKeys(args, ["id", "title", "containers", "patterns"], TOOL);
+  onlyKeys(
+    args,
+    ["id", "title", "containers", "patterns", "pageTemplate"],
+    TOOL,
+  );
+  if (
+    args.pageTemplate !== undefined &&
+    !Object.hasOwn(PAGE_TEMPLATES, args.pageTemplate)
+  )
+    fail(`pageTemplate: אחד מ־${Object.keys(PAGE_TEMPLATES).join(", ")}`);
   if (args.id !== undefined && !numericId(args.id))
     fail("id: מזהה עמוד לא תקין");
   if (args.id === undefined && args.title === undefined)
@@ -1605,7 +1633,7 @@ class ElementorBuilder {
         Buffer.byteLength(response.body) > LIMIT
       )
         throw Error("html");
-      data = response.body ? JSON.parse(response.body) : null;
+      data = response.body ? parseJson(response) : null;
     } catch (e) {
       if (e?.elementor) throw e;
       const error = networkFailure(e, {
@@ -1615,7 +1643,9 @@ class ElementorBuilder {
         signal,
         limit: LIMIT,
       });
-      if (!error.notApplied && error.kind !== "html")
+      if (error.kind === "html") {
+        /* message set by networkFailure */
+      } else if (!error.notApplied)
         error.message = write
           ? "תוצאת השינוי באתר אינה ידועה; אין ניסיון חוזר אוטומטי."
           : "קריאת המידע מהאתר נכשלה (רשת, הרשאות או REST API לא נתמך).";
@@ -1637,9 +1667,8 @@ class ElementorBuilder {
     if (![200, 201].includes(status))
       throw this.httpFailure(status, data, write, route);
     if (!data || typeof data !== "object") {
-      const error = Object.assign(new Error("תשובת האתר אינה תקינה"), {
-        detail: "response",
-      });
+      // An empty or non-object answer to a request that should return JSON: the same friendly error.
+      const error = networkFailure(htmlResponse(response), { write });
       if (write) error.ambiguousWrite = true;
       throw error;
     }
@@ -2082,6 +2111,12 @@ class ElementorBuilder {
           ? "\nכותרת העמוד של התבנית תוסתר (הגדרת העמוד hide_title), כי העמוד נפתח בפתיח שמציג כותרת משלו."
           : "\nהאתר אינו חושף את הגדרות העמוד ל־REST, ולכן כותרת העמוד של התבנית לא הוסתרה. להסתרה ידנית: Elementor ← הגדרות עמוד ← הסתר כותרת."
         : "";
+    const wantedTemplate =
+      a.pageTemplate !== undefined ? PAGE_TEMPLATES[a.pageTemplate] : undefined;
+    const templateLine = (from) =>
+      wantedTemplate === undefined
+        ? ""
+        : `\nתבנית העמוד: ${from === undefined ? "" : templateLabel(from) + " ← "}${templateLabel(wantedTemplate)}`;
     if (a.id === undefined) {
       const exposure = await this.assertExposed(project, signal);
       const hide = hero && exposure.pageSettings;
@@ -2098,6 +2133,7 @@ class ElementorBuilder {
         payload: {
           title: a.title,
           status: "draft",
+          ...(wantedTemplate !== undefined ? { template: wantedTemplate } : {}),
           meta: {
             _elementor_edit_mode: "builder",
             _elementor_template_type: "wp-page",
@@ -2109,7 +2145,7 @@ class ElementorBuilder {
         },
         preview: { before: null, payload: structureView },
         warning: `טיוטה בלבד — לא מפורסם. העמוד ייערך ב־Elementor כרגיל${rtl ? "; הוגדרו יישור ימין והגדרות RTL" : ""}. ניתן לבטל (הטיוטה תועבר לפח).`,
-        summary: `ייווצר עמוד Elementor חדש כטיוטה: '${a.title}' — ${kinds.total} אלמנטים (${kindText}).\n${lines.join("\n")}${phLine}${hideLine(hide)}`,
+        summary: `ייווצר עמוד Elementor חדש כטיוטה: '${a.title}' — ${kinds.total} אלמנטים (${kindText}).\n${lines.join("\n")}${phLine}${hideLine(hide)}${templateLine()}`,
       });
     }
     const current = await this.readPage(project, a.id, signal);
@@ -2141,10 +2177,16 @@ class ElementorBuilder {
         ...current.pageSettings,
         hide_title: "yes",
       };
+    // The page layout changes only when it differs from the page's current template.
+    const templateChange =
+      wantedTemplate !== undefined &&
+      wantedTemplate !== (current.pageTemplate ?? "");
+    if (templateChange) payload.template = wantedTemplate;
     if (
       sameText(canonText(parseData(current.data || "[]")), canonText(data)) &&
       payload.title === undefined &&
-      !hideChange
+      !hideChange &&
+      !templateChange
     )
       fail("אין שינוי: התוכן המבוקש זהה לתוכן הקיים");
     const published = current.status === "publish";
@@ -2157,6 +2199,7 @@ class ElementorBuilder {
         values,
         placeholders: ph,
         hideTitle: hideChange,
+        templateChanged: templateChange,
       },
       before: current,
       payload,
@@ -2171,7 +2214,7 @@ class ElementorBuilder {
         payload: { ...structureView, title: payload.title ?? current.title },
       },
       warning: `${published ? "זהו עמוד מפורסם — האישור ישנה את האתר הגלוי מיד. " : ""}העדכון מחליף את כל תוכן העמוד ב־Elementor (${existing.count} אלמנטים קיימים); עיצוב מתקדם שנוסף ידנית בעורך יאבד. הנתונים הקודמים נשמרים לשחזור. ${CSS_WARN}`,
-      summary: `יוחלף תוכן עמוד Elementor '${current.title || "ללא כותרת"}' ב־${kinds.total} אלמנטים (${kindText}).\n${lines.join("\n")}${phLine}${hideLine(hide)}`,
+      summary: `יוחלף תוכן עמוד Elementor '${current.title || "ללא כותרת"}' ב־${kinds.total} אלמנטים (${kindText}).\n${lines.join("\n")}${phLine}${hideLine(hide)}${templateChange ? templateLine(current.pageTemplate ?? "") : ""}`,
     });
   }
   // Plan step at execution time: references are real ids now, so the media is resolved and the JSON rebuilt from them.
@@ -2654,6 +2697,13 @@ class ElementorBuilder {
       if (canonText(settings) !== canonText(current.pageSettings))
         payload.meta._elementor_page_settings = settings;
     }
+    // The page layout is given back when the approved write changed it.
+    if (
+      t.templateChanged &&
+      typeof entry.before.pageTemplate === "string" &&
+      entry.before.pageTemplate !== (current.pageTemplate ?? "")
+    )
+      payload.template = entry.before.pageTemplate;
     return this.pending(agent, project, named("elementor-revert"), {
       resource,
       target: {
@@ -2806,6 +2856,7 @@ class ElementorBuilder {
             templateType: p.before.templateType,
             data: p.before.data,
             pageSettings: p.before.pageSettings ?? null,
+            pageTemplate: p.before.pageTemplate ?? null,
           }
         : null,
       target: t,
@@ -2978,6 +3029,8 @@ Object.assign(H, {
   hebrew,
   digest,
   stateOfPage,
+  PAGE_TEMPLATES,
+  templateLabel,
 });
 module.exports = {
   ElementorBuilder,

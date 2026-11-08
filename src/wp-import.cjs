@@ -1,6 +1,7 @@
 "use strict";
 const { randomUUID } = require("node:crypto");
-const { imageURL } = require("./wordpress.cjs");
+const { imageURL, pageURL, inputError } = require("./wordpress.cjs");
+const { googleDocLink } = require("./google-docs.cjs");
 const { planTool } = require("./wp-plans.cjs");
 const PASS_PAGES = 5,
   TOTAL_PAGES = 20;
@@ -153,18 +154,23 @@ function validateImport(name, args) {
     ) ||
     tool.parameters.required.some((k) => !Object.hasOwn(args, k))
   )
-    throw Error("פרמטרי ייבוא אינם תקינים");
+    throw inputError("פרמטרי ייבוא אינם תקינים");
   if (name === "wp_read_import_site") {
     if (args.continue !== undefined && typeof args.continue !== "boolean")
-      throw Error("פרמטרי ייבוא אינם תקינים");
-    if (!args.continue || args.url !== undefined) imageURL(args.url);
+      throw inputError("פרמטרי ייבוא אינם תקינים");
+    if (!args.continue || args.url !== undefined) {
+      // A Google document is never a site to import: the model is sent to the document tool (no import cost question).
+      const doc = googleDocLink(args.url);
+      if (doc) throw inputError(doc);
+      pageURL(args.url, "כתובת האתר לייבוא");
+    }
     if (
       args.maxPages !== undefined &&
       (!Number.isInteger(args.maxPages) ||
         args.maxPages < 1 ||
         args.maxPages > PASS_PAGES)
     )
-      throw Error(`ניתן לקרוא עד ${PASS_PAGES} עמודים בכל סבב ייבוא`);
+      throw inputError(`ניתן לקרוא עד ${PASS_PAGES} עמודים בכל סבב ייבוא`);
   } else {
     const menus = Array.isArray(args.steps)
       ? args.steps.filter((s) => s?.tool === "wp_prepare_menu").length
@@ -178,11 +184,11 @@ function validateImport(name, args) {
       args.steps.some((s) => !s || !IMPORT_STEPS.includes(s.tool)) ||
       !args.steps.some(isPageStep)
     ) {
-      throw Error(
+      throw inputError(
         "ייבוא מאפשר רק העלאת תמונות ויצירת עמודי טיוטה, עד 40 שלבים",
       );
     }
-    if (menus > 1) throw Error("בייבוא מותר שלב תפריט אחד בלבד");
+    if (menus > 1) throw inputError("בייבוא מותר שלב תפריט אחד בלבד");
     checkImportOrder(args.steps);
     checkImportRefs(args.steps);
   }
@@ -255,17 +261,18 @@ class SiteImporter {
         !session ||
         session.fingerprint !== fingerprint ||
         session.expires < agent.now() ||
-        (args.url !== undefined && imageURL(args.url).origin !== session.origin)
+        (args.url !== undefined &&
+          pageURL(args.url, "כתובת האתר לייבוא").origin !== session.origin)
       )
-        throw Error("אין סבב ייבוא קודם להמשך באתר זה; התחילו ייבוא חדש");
+        throw inputError("אין סבב ייבוא קודם להמשך באתר זה; התחילו ייבוא חדש");
       this.settle(id, session);
       if (session.imported >= TOTAL_PAGES)
-        throw Error(`הייבוא הגיע למגבלה של ${TOTAL_PAGES} עמודים`);
+        throw inputError(`הייבוא הגיע למגבלה של ${TOTAL_PAGES} עמודים`);
       if (!session.remaining.length)
-        throw Error("לא נותרו עמודים נוספים לייבוא באתר זה");
+        throw inputError("לא נותרו עמודים נוספים לייבוא באתר זה");
     } else {
       this.sessions.delete(id);
-      const start = imageURL(args.url);
+      const start = pageURL(args.url, "כתובת האתר לייבוא");
       session = {
         origin: start.origin,
         source: start.href,
@@ -331,7 +338,7 @@ class SiteImporter {
         }
         if (
           typeof page?.url !== "string" ||
-          imageURL(page.url).origin !== origin ||
+          pageURL(page.url).origin !== origin ||
           !Array.isArray(page.sections) ||
           !Array.isArray(page.images) ||
           !Array.isArray(page.links)
@@ -341,7 +348,7 @@ class SiteImporter {
           (a, b) => Number(!!b.navigation) - Number(!!a.navigation),
         )) {
           try {
-            const next = imageURL(link.url);
+            const next = pageURL(link.url);
             if (
               next.origin !== origin ||
               /\.(?:pdf|zip|xml|json|jpg|jpeg|png|webp|gif|svg|mp4|mp3)$/i.test(

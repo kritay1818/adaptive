@@ -74,10 +74,19 @@ function tools(S) {
       name: EDIT_TOOL,
       description:
         "Targeted edit of an EXISTING Elementor page; everything not named stays exactly as it is (unknown, third-party and Pro widgets included). Read the page first with wp_read_elementor_page: it lists every element id. operations: set {id, set:{text, html, color, background, mediaId, backgroundImage, url, paddingX, size, ...}} for known widgets and containers; insert {position before|after + target id (the section containing it) or start|end, patterns / containers}; remove {id}; move {id, position, target}. Never send Elementor JSON, HTML, scripts or code. Nothing is written before the user approves the review card; read-back and undo as usual.",
-      parameters: schema({ id, operations: operationsSchema(id, S) }, [
-        "id",
-        "operations",
-      ]),
+      parameters: schema(
+        {
+          id,
+          operations: operationsSchema(id, S),
+          pageTemplate: {
+            type: "string",
+            enum: ["default", "full-width", "canvas"],
+            description:
+              "Page layout: full-width = Elementor Full Width (what 'רוחב מלא' means), canvas = Elementor Canvas, default = the theme's. May be used alone, without operations.",
+          },
+        },
+        ["id"],
+      ),
     },
   ];
 }
@@ -323,10 +332,23 @@ module.exports = function edit(h) {
   }
   function validateEdit(args) {
     if (!h.object(args)) h.fail("ארגומנטים לא תקינים");
-    h.onlyKeys(args, ["id", "operations"], EDIT_TOOL);
+    h.onlyKeys(args, ["id", "operations", "pageTemplate"], EDIT_TOOL);
     if (!h.numericId(args.id)) h.fail("id: מזהה עמוד לא תקין");
-    const ops = args.operations;
-    if (!Array.isArray(ops) || !ops.length || ops.length > MAX_OPS)
+    if (
+      args.pageTemplate !== undefined &&
+      !Object.hasOwn(h.PAGE_TEMPLATES, args.pageTemplate)
+    )
+      h.fail(`pageTemplate: אחד מ־${Object.keys(h.PAGE_TEMPLATES).join(", ")}`);
+    if (args.operations === undefined && args.pageTemplate === undefined)
+      h.fail(
+        "נדרשות operations (שינויים באלמנטים) ו/או pageTemplate (תבנית העמוד)",
+      );
+    const ops = args.operations ?? [];
+    if (
+      !Array.isArray(ops) ||
+      (args.operations !== undefined && !ops.length) ||
+      ops.length > MAX_OPS
+    )
       h.fail(`operations: 1 עד ${MAX_OPS} פעולות`);
     ops.forEach((op, i) => {
       const L = `operations[${i}]`;
@@ -744,8 +766,51 @@ module.exports = function edit(h) {
         h.fail("העמוד אחרי השינוי גדול מדי (מעל 2.5MB); צמצמו את ההוספות");
       return { data: work, text, changes, elements: countAll(work) };
     },
+    // Operations (if any) and/or a new page layout, as the write payload. Throws when nothing would change.
+    async editResult(project, a, current, env, signal) {
+      const ops = a.operations ?? [];
+      const out = ops.length
+        ? await this.applyEdit(
+            project,
+            { ...a, operations: ops },
+            current,
+            env,
+            signal,
+          )
+        : {
+            data: h.parseData(current.data || "[]"),
+            text: null,
+            changes: [],
+            elements: countAll(h.parseData(current.data || "[]")),
+          };
+      const wanted =
+        a.pageTemplate !== undefined
+          ? h.PAGE_TEMPLATES[a.pageTemplate]
+          : undefined;
+      const templateChanged =
+        wanted !== undefined && wanted !== (current.pageTemplate ?? "");
+      if (!ops.length && !templateChanged)
+        h.fail("אין שינוי: העמוד כבר משתמש בתבנית העמוד המבוקשת");
+      if (templateChanged)
+        out.changes.push(
+          `תבנית העמוד: ${h.templateLabel(current.pageTemplate ?? "")} ← ${h.templateLabel(wanted)}`,
+        );
+      out.templateChanged = templateChanged;
+      out.payload = {
+        ...(out.text
+          ? {
+              meta: {
+                _elementor_edit_mode: "builder",
+                _elementor_data: out.text,
+              },
+            }
+          : {}),
+        ...(templateChanged ? { template: wanted } : {}),
+      };
+      return out;
+    },
     async globalValuesFor(project, info, a, signal) {
-      return a.operations.some((o) => o.op === "insert" && o.patterns)
+      return (a.operations ?? []).some((o) => o.op === "insert" && o.patterns)
         ? this.templateGlobalValues(project, info, signal)
         : null;
     },
@@ -777,7 +842,7 @@ module.exports = function edit(h) {
       const rtl =
         h.hebrew(h.parseData(current.data || "[]")) ||
         (await this.rtl(project, { containers: [] }, signal));
-      const out = await this.applyEdit(
+      const out = await this.editResult(
         project,
         a,
         current,
@@ -795,12 +860,19 @@ module.exports = function edit(h) {
           palette,
           values,
           // For the next step of a plan that edits the same (virtual) page.
-          ...(plan ? { virtualAfter: { ...current, data: out.text } } : {}),
+          templateChanged: out.templateChanged,
+          ...(plan
+            ? {
+                virtualAfter: {
+                  ...current,
+                  data: out.text ?? current.data,
+                  pageTemplate: out.payload.template ?? current.pageTemplate,
+                },
+              }
+            : {}),
         },
         before: current,
-        payload: {
-          meta: { _elementor_edit_mode: "builder", _elementor_data: out.text },
-        },
+        payload: out.payload,
         pageId: current.id,
         preview: {
           before: {
@@ -825,7 +897,7 @@ module.exports = function edit(h) {
       const current = await this.readPage(project, a.id, signal);
       this.checkEditable(current, "עריכה");
       const rtl = !!p.target?.rtl;
-      const out = await this.applyEdit(
+      const out = await this.editResult(
         project,
         a,
         current,
@@ -839,10 +911,12 @@ module.exports = function edit(h) {
       p.before = current;
       p.beforeDigest = h.digest(current);
       p.pageId = current.id;
-      p.target = { ...p.target, pageId: current.id };
-      p.payload = {
-        meta: { _elementor_edit_mode: "builder", _elementor_data: out.text },
+      p.target = {
+        ...p.target,
+        pageId: current.id,
+        templateChanged: out.templateChanged,
       };
+      p.payload = out.payload;
       return p;
     },
     // ---- duplicate -------------------------------------------------------------------------------------------------------------

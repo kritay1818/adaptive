@@ -272,13 +272,42 @@ function wixOriginal(url) {
   const m = /^(\/media\/[^/]+)\/v1\/.+$/.exec(url.pathname);
   return m ? imageURL(`https://static.wixstatic.com${m[1]}`) : null;
 }
+// An error in what the model (or user) typed: it goes back to the model as a tool result, never ends the run.
+const inputError = (message) =>
+  Object.assign(new Error(message), { input: true });
+// The address of a PAGE to read (a site to import, a design reference): https, public host, no credentials. A #fragment is dropped.
+// Every message names this context (never "image").
+function pageURL(value, what = "הכתובת") {
+  if (typeof value !== "string" || !value.trim() || value.length > 2048)
+    throw inputError(`${what}: נדרשת כתובת (עד 2048 תווים)`);
+  const raw = value.trim();
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw inputError(`${what} אינה כתובת תקינה`);
+  }
+  if (url.protocol !== "https:")
+    throw inputError(`${what} חייבת להתחיל ב־https://`);
+  if (url.username || url.password)
+    throw inputError(`${what} לא יכולה לכלול שם משתמש וסיסמה`);
+  if (/[\\\s\x00-\x1f]/.test(raw))
+    throw inputError(`${what} כוללת תווים אסורים`);
+  try {
+    siteURL(url.origin);
+  } catch (e) {
+    throw inputError(`${what}: ${e.message}`);
+  }
+  url.hash = "";
+  return url;
+}
 function imageURL(value) {
   text(value, 2048);
   let url;
   try {
     url = new URL(value);
   } catch {
-    throw new Error("כתובת תמונה אינה תקינה");
+    throw inputError("כתובת תמונה אינה תקינה");
   }
   // Reuse the site URL policy, but image query strings are allowed (e.g. CDN sizing).
   siteURL(url.origin);
@@ -290,7 +319,9 @@ function imageURL(value) {
     value.slice(8).split(/[/?#]/)[0].includes("@") ||
     /[\\\s\x00-\x1f]/.test(value)
   )
-    throw new Error("נדרשת כתובת תמונה ציבורית ב־HTTPS ללא פרטי כניסה");
+    throw inputError(
+      "כתובת התמונה חייבת להיות ציבורית ב־HTTPS, בלי פרטי כניסה, בלי # ובלי רווחים (העלאת תמונה)",
+    );
   return url;
 }
 function imageType(bytes, mime) {
@@ -461,6 +492,16 @@ function htmlResponse(response) {
     htmlInfo: { status: Number(response?.status) || 0, contentType, title },
   });
 }
+// JSON.parse for a WordPress answer: whatever the content type says, a body that is not JSON (a deleted/expired site's page, a
+// firewall page, an empty body) is the same friendly "not a valid answer" error, with status / content type / title as details.
+function parseJson(response) {
+  try {
+    return JSON.parse(response.body);
+  } catch (e) {
+    if (e instanceof SyntaxError) throw htmlResponse(response);
+    throw e;
+  }
+}
 // One place that turns any failure of a WordPress request into a Hebrew error with a SPECIFIC technical reason (error.detail):
 // timeout (seconds + phase: connecting / sending / waiting / reading), HTTP status, response too large, invalid JSON,
 // network error code. A certificate error is its own clear message. A request that never left the machine (connection or TLS
@@ -476,7 +517,7 @@ function networkFailure(e, { write, timeoutMs, deadline, signal, limit }) {
   if (/^status:(\d+)$/.test(m)) reason = `האתר החזיר סטטוס HTTP ${m.slice(7)}`;
   else if (m === "html")
     reason = e.htmlInfo
-      ? `האתר החזיר דף HTML במקום JSON — סטטוס HTTP: ${e.htmlInfo.status || "לא ידוע"}; סוג תוכן: ${e.htmlInfo.contentType || "לא ידוע"}; כותרת הדף: ${e.htmlInfo.title || "(ללא)"}`
+      ? `תשובת האתר אינה JSON תקין (דף אינטרנט או תשובה ריקה) — סטטוס HTTP: ${e.htmlInfo.status || "לא ידוע"}; סוג תוכן: ${e.htmlInfo.contentType || "לא ידוע"}; כותרת הדף: ${e.htmlInfo.title || "(ללא)"}`
       : "האתר החזיר דף HTML במקום JSON";
   else if (m === "response")
     reason = "תשובת האתר אינה תקינה (סטטוס או סוג תוכן לא צפויים)";
@@ -503,7 +544,8 @@ function networkFailure(e, { write, timeoutMs, deadline, signal, limit }) {
   );
   error.detail = reason;
   error.kind = c.kind;
-  if (m === "html") {
+  // An HTML page, or any body that failed JSON parsing, whatever its content type.
+  if ((m === "html" || e instanceof SyntaxError) && c.kind !== "cert") {
     error.kind = "html";
     error.message = HTML_MESSAGE;
   }
@@ -733,7 +775,7 @@ class WordPress {
       if (Buffer.byteLength(result.body) > PAGE_RESPONSE_LIMIT)
         throw new Error("size");
       if (HTML_TYPE.test(result.contentType || "")) throw htmlResponse(result);
-      const parsed = JSON.parse(result.body);
+      const parsed = parseJson(result);
       // The list size travels with the array (not enumerable, never serialized).
       if (Array.isArray(parsed) && result.total)
         Object.defineProperty(parsed, "total", { value: result.total });
@@ -1034,7 +1076,7 @@ class WordPress {
         Buffer.byteLength(result.body) > 262144
       )
         throw new Error("response");
-      const data = JSON.parse(result.body);
+      const data = parseJson(result);
       if (
         method === "GET" &&
         result.status === 404 &&
@@ -1251,6 +1293,8 @@ module.exports = {
   publicAddress,
   request,
   imageURL,
+  pageURL,
+  inputError,
   imageFields,
   imageType,
   sniffImage,
@@ -1264,6 +1308,8 @@ module.exports = {
   mediaFields,
   networkFailure,
   htmlResponse,
+  parseJson,
+  HTML_MESSAGE,
   HTML_TYPE,
   tlsCA,
 };

@@ -180,6 +180,10 @@ const planTool = {
               ),
               // Existing Elementor pages: the source of a copy, and targeted operations (id may be an earlier copy).
               sourceId: { type: "integer" },
+              pageTemplate: {
+                type: "string",
+                enum: ["default", "full-width", "canvas"],
+              },
               operations: operationsSchema(referenceId),
               globalColors: globalsSchema.globalColors,
               globalFonts: globalsSchema.globalFonts,

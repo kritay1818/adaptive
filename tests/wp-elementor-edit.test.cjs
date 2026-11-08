@@ -415,7 +415,8 @@ async function fixture(t, over = {}) {
         if (!p) return err(404, "rest_post_invalid_id");
         if (payload.title !== undefined) p.title = payload.title;
         if (payload.status !== undefined) p.status = payload.status;
-        if (payload.template !== undefined) p.template = payload.template;
+        if (payload.template !== undefined && !state.ignoreTemplate)
+          p.template = payload.template;
         if (payload.meta && !state.dropMeta)
           Object.assign(p.meta, structuredClone(payload.meta));
         return reply(json(p), id === null ? 201 : 200);
@@ -1113,4 +1114,108 @@ test("guards and wiring: only valid template strings reach the site; the agent i
   assert.match(ELEMENTOR_GUIDE, /wp_prepare_elementor_edit/);
   assert.match(ELEMENTOR_GUIDE, /per_page up to 50/);
   assert.ok(f.agent.context("p").includes("wp_prepare_elementor_edit"));
+});
+
+// ---- page layout (template) --------------------------------------------------------------------------------------------------------
+test("page template: create with full width, edit a page's layout alone or with operations; review, read-back and undo", async (t) => {
+  const f = await fixture(t);
+  // Create with Elementor Full Width ("רוחב מלא").
+  const created = await prepare(f.agent, "wp_prepare_elementor_page", {
+    title: "עמוד ברוחב מלא",
+    pageTemplate: "full-width",
+    containers: [{ children: [{ type: "heading", text: "שלום", level: 2 }] }],
+  });
+  assert.match(created.review.summary, /תבנית העמוד: Elementor רוחב מלא/);
+  const out = await f.agent.decide("p", created.review.token, true);
+  assert.equal(out.outcome, "verified");
+  const [w] = pageWrites(f);
+  assert.equal(w.payload.template, "elementor_header_footer");
+  const copy = [...f.state.pages.values()].find(
+    (p) => p.title === "עמוד ברוחב מלא",
+  );
+  assert.equal(copy.template, "elementor_header_footer");
+  // Not given: no template key is sent.
+  const g = await fixture(t);
+  await approve(g, "wp_prepare_elementor_page", {
+    title: "רגיל",
+    containers: [{ children: [{ type: "heading", text: "שלום", level: 2 }] }],
+  });
+  assert.ok(!("template" in pageWrites(g)[0].payload));
+  // Invalid layout name.
+  const bad = await tool(f.agent, "wp_prepare_elementor_page", {
+    title: "x",
+    pageTemplate: "wide",
+    containers: [{ children: [{ type: "heading", text: "שלום", level: 2 }] }],
+  });
+  assert.match(bad.error, /pageTemplate/);
+
+  // Layout alone on an existing page (no operations), then the same again, then undo.
+  const h = await fixture(t);
+  const before = h.state.pages.get(11).meta._elementor_data;
+  const r = await prepare(h.agent, "wp_prepare_elementor_edit", {
+    id: 11,
+    pageTemplate: "full-width",
+  });
+  assert.match(
+    r.review.summary,
+    /תבנית העמוד: ברירת המחדל של ערכת העיצוב ← Elementor רוחב מלא/,
+  );
+  assert.equal(pageWrites(h).length, 0);
+  const done = await h.agent.decide("p", r.review.token, true);
+  assert.equal(done.outcome, "verified");
+  assert.deepEqual(pageWrites(h)[0].payload, {
+    template: "elementor_header_footer",
+  });
+  assert.equal(h.state.pages.get(11).template, "elementor_header_footer");
+  assert.equal(
+    h.state.pages.get(11).meta._elementor_data,
+    before,
+    "the content is untouched",
+  );
+  const same = await tool(h.agent, "wp_prepare_elementor_edit", {
+    id: 11,
+    pageTemplate: "full-width",
+  });
+  assert.match(same.error, /אין שינוי/);
+  const entry = h.agent
+    .getActivityLog("p")
+    .find((e) => e.action === "elementor-edit");
+  const review = await h.agent.prepareUndo("p", entry.id);
+  assert.equal(review.kind, "elementor-revert");
+  const undone = await h.agent.decide("p", review.token, true);
+  assert.equal(undone.outcome, "verified");
+  assert.equal(
+    h.state.pages.get(11).template,
+    "",
+    "the previous layout is back",
+  );
+  assert.equal(h.state.pages.get(11).meta._elementor_data, before);
+
+  // Canvas together with operations on the big page; default goes back to the theme's.
+  const k = await fixture(t);
+  const both = await approve(k, "wp_prepare_elementor_edit", {
+    id: 10,
+    pageTemplate: "canvas",
+    operations: [{ op: "set", id: "ttl00001", set: { text: "שלום" } }],
+  });
+  assert.equal(both.result.outcome, "verified");
+  assert.equal(k.state.pages.get(10).template, "elementor_canvas");
+  assert.match(both.review.summary, /Elementor Canvas/);
+  assert.equal(dataOf(k, 10)[0].elements[0].settings.title, "שלום");
+  const back = await approve(k, "wp_prepare_elementor_edit", {
+    id: 10,
+    pageTemplate: "default",
+  });
+  assert.equal(back.result.outcome, "verified");
+  assert.equal(k.state.pages.get(10).template, "");
+  // A template that the read-back does not find blocks the project (a site that ignores the field).
+  const stuck = await fixture(t, { ignoreTemplate: true });
+  const r2 = await prepare(stuck.agent, "wp_prepare_elementor_edit", {
+    id: 11,
+    pageTemplate: "canvas",
+  });
+  const o2 = await stuck.agent.decide("p", r2.review.token, true);
+  assert.equal(o2.outcome, "unknown");
+  assert.equal(stuck.agent.isBlocked("p"), true);
+  assert.match(f.agent.context("p"), /pageTemplate|PAGE LAYOUT/);
 });

@@ -2,7 +2,7 @@
 const https = require("node:https");
 const net = require("node:net");
 const { randomUUID } = require("node:crypto");
-const { imageURL, tlsCA } = require("./wordpress.cjs");
+const { imageURL, pageURL, tlsCA } = require("./wordpress.cjs");
 
 // Executed in an isolated world with no preload, Node, or application bridge.
 // Extract data, never source HTML, source scripts, handlers, or instructions.
@@ -634,7 +634,7 @@ const CSP =
   "default-src https: data:; script-src https: 'unsafe-inline' 'unsafe-eval'; style-src https: 'unsafe-inline'; img-src https: data:; font-src https: data:; connect-src https:; worker-src 'none'; child-src 'none'; frame-src 'none'; object-src 'none'; media-src 'none'; form-action 'none'; base-uri 'none'";
 function createImportReader({ BrowserWindow, session }, wp) {
   return async (value, outerSignal, options = {}) => {
-    const source = imageURL(value);
+    const source = pageURL(value, "כתובת האתר");
     const controller = new AbortController();
     const signal = AbortSignal.any([
       outerSignal,

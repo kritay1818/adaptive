@@ -16,6 +16,31 @@ const fail = (message) => {
 };
 const ID = /^[A-Za-z0-9_-]{15,120}$/;
 
+// Hosts whose links are documents (never websites to import). Returns null for any other link.
+const GOOGLE_DOC_HOSTS = new Set([
+  "docs.google.com",
+  "drive.google.com",
+  "sheets.google.com",
+  "slides.google.com",
+  "drive.usercontent.google.com",
+]);
+function googleDocLink(raw) {
+  let u;
+  try {
+    u = new URL(String(raw).trim());
+  } catch {
+    return null;
+  }
+  if (!GOOGLE_DOC_HOSTS.has(u.hostname.toLowerCase())) return null;
+  if (u.hostname === "docs.google.com") {
+    if (/^\/document\//.test(u.pathname))
+      return "זה מסמך Google Docs — השתמשו ב-wp_read_google_doc";
+    if (/^\/spreadsheets\//.test(u.pathname))
+      return "זה מסמך Google Sheets — השתמשו ב-wp_read_google_doc";
+    return "זה קישור של Google Docs — השתמשו ב-wp_read_google_doc (מסמכים וגיליונות בלבד)";
+  }
+  return "זה קישור Google Drive — לא אתר. אם זה מסמך Google Docs פתוח לצפייה, השתמשו ב-wp_read_google_doc עם קישור המסמך עצמו (docs.google.com/document/d/…)";
+}
 function parseGoogleLink(raw) {
   let u;
   try {
@@ -23,6 +48,10 @@ function parseGoogleLink(raw) {
   } catch {
     fail("הקישור אינו כתובת תקינה");
   }
+  if (u.hostname === "drive.google.com")
+    fail(
+      "קישורי Google Drive אינם נתמכים כאן. פתחו את המסמך ב-Google Docs ושתפו את קישור המסמך (docs.google.com/document/d/…), בהגדרה 'כל מי שיש לו את הקישור ← צופה'.",
+    );
   if (
     u.protocol !== "https:" ||
     u.hostname !== "docs.google.com" ||
@@ -42,11 +71,15 @@ function parseGoogleLink(raw) {
   const gid = /^\d{1,12}$/.test(u.searchParams.get("gid") || "")
     ? u.searchParams.get("gid")
     : /#gid=(\d{1,12})/.exec(u.hash || "")?.[1] || null;
+  // A link into one tab of a document (?tab=t.xxx) reads that tab; without it the whole document is exported.
+  const tabParam = u.searchParams.get("tab");
+  const tab =
+    tabParam && /^t\.[A-Za-z0-9]{1,40}$/.test(tabParam) ? tabParam : null;
   const exportUrl =
     kind === "document"
-      ? `https://docs.google.com/document/d/${m[2]}/export?format=html`
+      ? `https://docs.google.com/document/d/${m[2]}/export?format=html${tab ? `&tab=${tab}` : ""}`
       : `https://docs.google.com/spreadsheets/d/${m[2]}/export?format=csv${gid ? `&gid=${gid}` : ""}`;
-  return { kind, id: m[2], gid, exportUrl };
+  return { kind, id: m[2], gid, tab, exportUrl };
 }
 // Redirect targets: https and *.googleusercontent.com only (at least one subdomain label), default port, no credentials.
 const googleUserContent = (u) =>
@@ -197,7 +230,12 @@ class GoogleDocs {
       }
       if (!type.includes("html") && !/<html/i.test(body.slice(0, 2000)))
         fail("גוגל החזירה תוכן לא צפוי");
-      return { source: "google-docs", id: parsed.id, ...htmlToBlocks(body) };
+      return {
+        source: "google-docs",
+        id: parsed.id,
+        tab: parsed.tab,
+        ...htmlToBlocks(body),
+      };
     }
     return fail("יותר מדי הפניות");
   }
@@ -511,6 +549,7 @@ function parseCsv(text) {
 module.exports = {
   GoogleDocs,
   parseGoogleLink,
+  googleDocLink,
   htmlToBlocks,
   parseCsv,
   googleUserContent,
