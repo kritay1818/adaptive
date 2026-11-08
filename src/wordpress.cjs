@@ -167,6 +167,8 @@ function request(
             {
               status: res.statusCode,
               contentType: res.headers?.["content-type"] || "",
+              // WordPress list size (X-WP-Total), for "there are N more" hints.
+              total: Number(res.headers?.["x-wp-total"]) || undefined,
               ...(hash ? { sha256: hash.digest("hex"), length } : {}),
               body: hash
                 ? Buffer.alloc(0)
@@ -673,7 +675,16 @@ class WordPress {
       throw new Error("פעולת WordPress אינה מורשית");
     if (
       Object.keys(query).some(
-        (k) => !["search", "page", "per_page"].includes(k),
+        (k) =>
+          ![
+            "search",
+            "page",
+            "per_page",
+            "slug",
+            "status",
+            "_fields",
+            "include",
+          ].includes(k),
       )
     )
       throw new Error("שאילתה אינה מורשית");
@@ -722,7 +733,11 @@ class WordPress {
       if (Buffer.byteLength(result.body) > PAGE_RESPONSE_LIMIT)
         throw new Error("size");
       if (HTML_TYPE.test(result.contentType || "")) throw htmlResponse(result);
-      return JSON.parse(result.body);
+      const parsed = JSON.parse(result.body);
+      // The list size travels with the array (not enumerable, never serialized).
+      if (Array.isArray(parsed) && result.total)
+        Object.defineProperty(parsed, "total", { value: result.total });
+      return parsed;
     } catch (e) {
       // Never reflect server payloads, Authorization or credentials; only a fixed technical reason is kept.
       throw networkFailure(e, {
@@ -746,6 +761,98 @@ class WordPress {
     if (!Array.isArray(result) || result.length > 100)
       throw new Error("רשימת עמודים לא תקינה");
     return result.map(pageSummary);
+  }
+  // Compact list for sites with hundreds of pages: no content, never more than 50 rows, with the list size.
+  async compactPages(id, query = {}, signal, resource = "pages") {
+    const base = "id,title,slug,status,modified,link";
+    const fetch = (fields) =>
+      this.pageRequest(
+        id,
+        null,
+        undefined,
+        { status: "any", ...query, _fields: fields },
+        signal,
+        resource,
+      );
+    let list;
+    try {
+      // meta._elementor_edit_mode tells which pages are Elementor pages (nested _fields; older sites may ignore it).
+      list = await fetch(
+        resource === "pages" ? base + ",meta._elementor_edit_mode" : base,
+      );
+    } catch (e) {
+      // A site that returns the whole meta (every Elementor page's JSON) makes the answer too big: retry without it.
+      if (resource !== "pages" || signal?.aborted) throw e;
+      list = await fetch(base);
+    }
+    if (!Array.isArray(list) || list.length > 100)
+      throw new Error("רשימת עמודים לא תקינה");
+    const items = list
+      .filter((p) => Number.isSafeInteger(p?.id) && p.id > 0)
+      .map((p) => {
+        let path = "";
+        try {
+          path = decodeURIComponent(new URL(String(p.link)).pathname);
+        } catch {
+          /* no link */
+        }
+        const mode = p.meta?._elementor_edit_mode;
+        return {
+          id: p.id,
+          title: String(p.title?.raw ?? p.title?.rendered ?? "").slice(0, 200),
+          slug: (() => {
+            try {
+              return decodeURIComponent(String(p.slug || "")).slice(0, 120);
+            } catch {
+              return String(p.slug || "").slice(0, 120);
+            }
+          })(),
+          status: String(p.status || "").slice(0, 20),
+          modified: typeof p.modified === "string" ? p.modified : "",
+          path: path.slice(0, 160),
+          ...(typeof mode === "string"
+            ? { isElementor: mode === "builder" }
+            : {}),
+        };
+      });
+    return { items, total: list.total ?? null };
+  }
+  // A pasted address -> what to look up: a front page, an id (?page_id= / ?p=) or a slug with its path.
+  // Percent-encoded Hebrew slugs are decoded; the host must be the connected site's.
+  locate(id, value) {
+    const site = this.status(id).site;
+    if (!site) throw new Error("אין חיבור WordPress לפרויקט");
+    let u, base;
+    try {
+      u = new URL(String(value).trim());
+      base = new URL(site);
+    } catch {
+      throw new Error("הכתובת אינה תקינה");
+    }
+    const bare = (h) => h.toLowerCase().replace(/^www\./, "");
+    if (
+      !["https:", "http:"].includes(u.protocol) ||
+      bare(u.hostname) !== bare(base.hostname)
+    )
+      throw new Error("הכתובת אינה של האתר המחובר");
+    const num = u.searchParams.get("page_id") || u.searchParams.get("p");
+    if (num && /^\d{1,10}$/.test(num)) return { id: Number(num) };
+    const decode = (s) => {
+      try {
+        return decodeURIComponent(s);
+      } catch {
+        return s;
+      }
+    };
+    let path = u.pathname.split("/").filter(Boolean).map(decode);
+    const root = base.pathname.split("/").filter(Boolean).map(decode);
+    if (root.length && root.every((s, i) => path[i] === s))
+      path = path.slice(root.length);
+    if (!path.length) return { front: true };
+    return {
+      slug: path.at(-1).toLowerCase(),
+      path: path.join("/").toLowerCase(),
+    };
   }
   async page(id, pageId, signal, resource = "pages") {
     const result = pageSummary(

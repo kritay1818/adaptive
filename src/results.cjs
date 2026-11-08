@@ -27,6 +27,10 @@ function doneText(p, result = {}) {
       return `נוצרה טיוטת עמוד Elementor: ${quote(title)}`;
     case "elementor-update":
       return `עמוד Elementor עודכן: ${quote(title)}`;
+    case "elementor-duplicate":
+      return `נוצר עותק טיוטה של ${quote(p.target?.sourceTitle)}: ${quote(title)}`;
+    case "elementor-edit":
+      return `עמוד Elementor עודכן בשינויים ממוקדים: ${quote(title)}`;
     case "elementor-template-create":
       return `נוצרה תבנית ${result.template?.type || p.target?.templateType || ""} — כדי להציג אותה בכל האתר: פתחו ב-Elementor ← Publish ← Entire Site`;
     case "elementor-template-update":
@@ -102,6 +106,8 @@ function viewTarget(rows) {
         "publish",
         "elementor-create",
         "elementor-update",
+        "elementor-duplicate",
+        "elementor-edit",
       ].includes(r.kind) &&
       ["pages", "posts"].includes(r.resource) &&
       Number.isSafeInteger(r.page) &&
@@ -153,6 +159,8 @@ const KIND_LABELS = {
   footer: "עדכון התחתית",
   "elementor-create": "יצירת עמוד Elementor",
   "elementor-update": "עדכון עמוד Elementor",
+  "elementor-duplicate": "העתקת עמוד Elementor",
+  "elementor-edit": "שינויים ממוקדים בעמוד Elementor",
   "elementor-globals": "עדכון צבעים וגופנים גלובליים",
   "elementor-template-create": "יצירת תבנית כותרת/תחתית של Elementor",
   "elementor-template-update": "עדכון תבנית כותרת/תחתית של Elementor",

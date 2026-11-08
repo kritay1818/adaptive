@@ -30,6 +30,8 @@ const {
 // Theme Builder header/footer templates (Elementor Pro). The helpers are handed over at the bottom of this file.
 const H = {};
 const tpl = require("./wp-elementor-template.cjs")(H);
+// Existing pages: duplicate, outline, targeted edits.
+const edit = require("./wp-elementor-edit.cjs")(H);
 
 const LIMIT = 3 * 1024 * 1024; // response size cap
 const MAX_DATA = 300 * 1024; // size cap of the _elementor_data we write
@@ -225,7 +227,19 @@ const elementorTools = [
     ),
   },
 ];
-elementorTools.push(...globalsTools, ...tpl.templateTools);
+const editSchemas = {
+  widgetProps,
+  containerProps,
+  containersSchema,
+  patternsSchema,
+};
+const operationsSchema = (idSchema) =>
+  edit.operationsSchema(idSchema, editSchemas);
+elementorTools.push(
+  ...globalsTools,
+  ...tpl.templateTools,
+  ...edit.tools(editSchemas),
+);
 const ELEMENTOR_READS = new Set([
   "wp_read_elementor_page",
   "wp_read_elementor_globals",
@@ -234,6 +248,8 @@ const ELEMENTOR_WRITES = new Set([
   "wp_prepare_elementor_page",
   GLOBALS_TOOL,
   tpl.TEMPLATE_TOOL,
+  edit.EDIT_TOOL,
+  edit.DUP_TOOL,
 ]);
 const ELEMENTOR_UNDOABLE = new Set([
   "elementor-create",
@@ -241,6 +257,8 @@ const ELEMENTOR_UNDOABLE = new Set([
   "elementor-globals",
   "elementor-template-create",
   "elementor-template-update",
+  "elementor-duplicate",
+  "elementor-edit",
 ]);
 const TOOL = "wp_prepare_elementor_page";
 
@@ -537,6 +555,8 @@ function validateElementor(name, args, opts = {}) {
   }
   if (name === GLOBALS_TOOL) return validateGlobals(args);
   if (name === tpl.TEMPLATE_TOOL) return tpl.validateTemplate(args);
+  if (name === edit.EDIT_TOOL) return edit.validateEdit(args);
+  if (name === edit.DUP_TOOL) return edit.validateDuplicate(args);
   if (name !== TOOL) fail("כלי Elementor לא מוכר");
   onlyKeys(args, ["id", "title", "containers", "patterns"], TOOL);
   if (args.id !== undefined && !numericId(args.id))
@@ -1330,6 +1350,19 @@ const CSS_CLEARED =
 const CSS_WARN =
   "אחרי הכתיבה והאימות האפליקציה תנסה לנקות את מטמון ה־CSS של Elementor (נתיב לא מתועד, דורש הרשאת מנהל; כשל בו אינו פוגע בשינוי). אם זה לא יצליח תתבקשו לרענן ידנית: Elementor ← כלים ← Regenerate CSS & Data.";
 
+// What is compared to detect drift and to verify a write; shared by execute and the duplicate source check.
+function stateOfPage(page, templates) {
+  return {
+    title: page.title,
+    status: page.status,
+    editMode: page.editMode,
+    data: canonText(parseData(page.data || "[]")),
+    settings: canonText(page.pageSettings ?? null),
+    pageTemplate: page.pageTemplate ?? null,
+    ...(templates ? { templateType: page.templateType } : {}),
+  };
+}
+
 class ElementorBuilder {
   constructor(wp) {
     this.wp = wp;
@@ -1405,7 +1438,13 @@ class ElementorBuilder {
       if (
         Object.keys(payload).some(
           (k) =>
-            !["title", "status", "meta", ...(tax ? [tax] : [])].includes(k),
+            ![
+              "title",
+              "status",
+              "meta",
+              "template",
+              ...(tax ? [tax] : []),
+            ].includes(k),
         )
       )
         fail();
@@ -1421,6 +1460,16 @@ class ElementorBuilder {
       if (
         payload.status !== undefined &&
         !["draft", "trash"].includes(payload.status)
+      )
+        fail();
+      if (
+        payload.template !== undefined &&
+        !(
+          route === "pages" &&
+          typeof payload.template === "string" &&
+          /^[A-Za-z0-9_.\/-]{0,100}$/.test(payload.template) &&
+          !payload.template.includes("..")
+        )
       )
         fail();
       if (payload.meta !== undefined) {
@@ -1440,6 +1489,17 @@ class ElementorBuilder {
           route === "templates" &&
           kind !== undefined &&
           !["header", "footer"].includes(kind)
+        )
+          fail();
+        if (
+          kind !== undefined &&
+          !(typeof kind === "string" && /^[a-z0-9_-]{0,40}$/.test(kind))
+        )
+          fail();
+        const data = payload.meta._elementor_data;
+        if (
+          data !== undefined &&
+          !(typeof data === "string" && data.length <= 3 * 1024 * 1024)
         )
           fail();
         const settings = payload.meta._elementor_page_settings;
@@ -1778,13 +1838,18 @@ class ElementorBuilder {
         typeof meta._elementor_data === "string" ? meta._elementor_data : "",
       // Page settings (_elementor_page_settings) as an object, or null when this site does not expose them as one.
       pageSettings: pageSettingsOf(meta),
+      // The page template (core REST field `template`), e.g. "elementor_header_footer"; null when not reported.
+      pageTemplate: typeof raw.template === "string" ? raw.template : null,
     };
   }
   async readPage(project, pageId, signal, missing = false) {
     const raw = await this.request(project, {
       route: "pages",
       target: pageId,
-      query: { context: "edit", _fields: "id,title,status,meta,modified" },
+      query: {
+        context: "edit",
+        _fields: "id,title,status,meta,modified,template",
+      },
       signal,
       missing,
     });
@@ -1898,6 +1963,8 @@ class ElementorBuilder {
     const info = inspectExisting(data);
     const rtl =
       hebrew(data) || (await this.rtl(project, { containers: [] }, signal));
+    const { entries, total, truncated } = edit.outlineOf(data);
+    const small = !info.unsupported.length && info.count <= MAX_ELEMENTS;
     return {
       id: page.id,
       title: page.title,
@@ -1907,7 +1974,12 @@ class ElementorBuilder {
       unsupported: info.unsupported,
       canUpdate:
         !info.unsupported.length && Buffer.byteLength(page.data) <= MAX_BEFORE,
-      structure: { containers: toStructure(data, rtl) },
+      // Targeted changes (wp_prepare_elementor_edit) work on ANY Elementor page by element id; unknown widgets stay as they are.
+      template: page.pageTemplate,
+      outline: entries,
+      outlineNote: `כל אלמנט עם id, סוג ותצוגה מקדימה. אפשר לשנות (set) רק אזורים (container) וווידג'טים מוכרים (heading, text-editor, image, button, spacer, divider, icon-list, video); ווידג'טים עם readOnly אפשר רק להזיז או להסיר, והם נשמרים כמות שהם.${truncated ? ` מוצגים ${entries.length} מתוך ${total} אלמנטים.` : ""}`,
+      // The simple structure only for small pages made of widgets the app builds (to rebuild them); big pages are edited by id.
+      ...(small ? { structure: { containers: toStructure(data, rtl) } } : {}),
     };
   }
   // ---- prepare -----------------------------------------------------------------------------------------------------------------
@@ -1957,6 +2029,10 @@ class ElementorBuilder {
       return this.prepareGlobals(agent, project, args, signal);
     if (name === tpl.TEMPLATE_TOOL)
       return this.prepareTemplate(agent, project, args, signal, plan);
+    if (name === edit.EDIT_TOOL)
+      return this.prepareEdit(agent, project, args, signal, plan);
+    if (name === edit.DUP_TOOL)
+      return this.prepareDuplicate(agent, project, args, signal, plan);
     const first = validateElementor(name, args);
     const info = await this.gate(project, signal);
     // A site that cannot offer global colors gets the kit patterns with a hex palette instead of global references.
@@ -2103,6 +2179,9 @@ class ElementorBuilder {
     if (p.kind === "elementor-globals") return p; // no references to resolve; the precondition check guards drift
     if (p.kind.startsWith("elementor-template"))
       return this.finalizeTemplate(agent, project, p, args, signal);
+    if (p.kind === "elementor-duplicate") return p; // the source was checked at execution (digest)
+    if (p.kind === "elementor-edit")
+      return this.finalizeEdit(agent, project, p, args, signal);
     const a = validateElementor(TOOL, args, {
       palette: p.target?.palette || null,
       values: p.target?.values || null,
@@ -2496,7 +2575,7 @@ class ElementorBuilder {
     });
   }
   // ---- undo --------------------------------------------------------------------------------------------------------------------
-  async prepareUndo(agent, project, entry, signal) {
+  async prepareUndo(agent, project, entry, signal, opts = {}) {
     if (entry.action === "elementor-globals")
       return this.prepareGlobalsUndo(agent, project, entry, signal);
     const t = entry.target || {};
@@ -2521,11 +2600,17 @@ class ElementorBuilder {
       templateType: current.templateType,
       dataDigest: digest(canon(parseData(current.data || "[]"))),
     };
-    if (digest(now) !== digest(entry.written)) stale();
-    if (
-      entry.action.replace(/^elementor-template-/, "elementor-") ===
-      "elementor-create"
-    ) {
+    const base = entry.action.replace(/^elementor-template-/, "elementor-");
+    const trashing =
+      base === "elementor-create" || base === "elementor-duplicate";
+    // In a plan undo, a copy that a later step of the same plan edited still carries that step's data: it is trashed as a whole.
+    const planned =
+      trashing &&
+      opts.planDigests?.has(now.dataDigest) &&
+      digest({ ...now, dataDigest: 0 }) ===
+        digest({ ...entry.written, dataDigest: 0 });
+    if (digest(now) !== digest(entry.written) && !planned) stale();
+    if (trashing) {
       if (current.status !== "draft")
         fail("לא ניתן לבטל יצירה — העמוד כבר אינו טיוטה באתר.");
       return this.pending(agent, project, named("elementor-trash"), {
@@ -2603,16 +2688,16 @@ class ElementorBuilder {
     const route = templates ? "templates" : "pages";
     const kind = p.kind.replace(/^elementor-template-/, "elementor-"),
       t = p.target || {};
-    const creating = kind === "elementor-create";
-    const stateOf = (page) => ({
-      title: page.title,
-      status: page.status,
-      editMode: page.editMode,
-      data: canonText(parseData(page.data || "[]")),
-      settings: canonText(page.pageSettings ?? null),
-      ...(templates ? { templateType: page.templateType } : {}),
-    });
+    const duplicating = kind === "elementor-duplicate";
+    const creating = kind === "elementor-create" || duplicating;
+    const stateOf = (page) => stateOfPage(page, templates);
     let current = null;
+    if (duplicating) {
+      // The copy is made from the source as it was reviewed.
+      const src = await this.readDoc(project, "pages", t.sourceId, signal);
+      if (digest(stateOfPage(src, false)) !== t.sourceDigest)
+        fail("העמוד המקורי השתנה מאז הבדיקה; יש להכין אישור חדש");
+    }
     if (!creating) {
       current = await this.readDoc(
         project,
@@ -2622,7 +2707,13 @@ class ElementorBuilder {
         false,
         t.libType?.base,
       );
-      if (digest(stateOf(current)) !== digest(stateOf(p.before)))
+      if (p.rebase) {
+        // A step of a plan undo whose page an earlier undo step of the same plan has just restored: it works on the page as it is now.
+        if (kind === "elementor-trash" && current.status !== "draft")
+          fail("לא ניתן לבטל יצירה — העמוד כבר אינו טיוטה באתר.");
+        p.before = current;
+        p.beforeDigest = digest(current);
+      } else if (digest(stateOf(current)) !== digest(stateOf(p.before)))
         fail("העמוד השתנה מאז הבדיקה; יש להכין אישור חדש");
     }
     const expected = () => {
@@ -2649,6 +2740,12 @@ class ElementorBuilder {
         templateType: templates
           ? (meta._elementor_template_type ?? p.before?.templateType)
           : undefined,
+        pageTemplate:
+          p.payload.template !== undefined
+            ? p.payload.template
+            : p.before
+              ? stateOf(p.before).pageTemplate
+              : undefined,
       };
     };
     let libTermId = null;
@@ -2659,22 +2756,32 @@ class ElementorBuilder {
     const mismatchData = (actual) => {
       const e = expected(),
         a = stateOf(actual);
-      return ["title", "status", "editMode", "data", "settings", "templateType"]
+      return [
+        "title",
+        "status",
+        "editMode",
+        "data",
+        "settings",
+        "templateType",
+        "pageTemplate",
+      ]
         .filter((k) =>
           k === "title"
             ? !sameText(e[k], a[k])
-            : k === "settings" || k === "templateType"
+            : ["settings", "templateType", "pageTemplate"].includes(k)
               ? e[k] !== undefined && e[k] !== a[k]
               : e[k] !== a[k],
         )
         .map((k) =>
-          k === "templateType"
-            ? "סוג התבנית שנשמר שונה מהמאושר"
-            : k === "settings"
-              ? "הגדרות העמוד שנשמרו שונות מהמאושר"
-              : k === "data"
-                ? "נתוני Elementor שנשמרו שונים מהמאושר"
-                : `${k}: צפוי ${String(e[k]).slice(0, 60)}, התקבל ${String(a[k]).slice(0, 60)}`,
+          k === "pageTemplate"
+            ? "תבנית העמוד שנשמרה שונה מהמאושרת"
+            : k === "templateType"
+              ? "סוג התבנית שנשמר שונה מהמאושר"
+              : k === "settings"
+                ? "הגדרות העמוד שנשמרו שונות מהמאושר"
+                : k === "data"
+                  ? "נתוני Elementor שנשמרו שונים מהמאושר"
+                  : `${k}: צפוי ${String(e[k]).slice(0, 60)}, התקבל ${String(a[k]).slice(0, 60)}`,
         )
         .join("; ");
     };
@@ -2798,11 +2905,15 @@ class ElementorBuilder {
         : kind === "elementor-trash"
           ? `WordPress: טיוטת התבנית ${actual.id} הועברה לפח האשפה (Trash).`
           : `WordPress: עודכנה תבנית Elementor ${actual.id}. התוכן אומת בקריאה חוזרת מהאתר.`
-      : kind === "elementor-create"
-        ? `WordPress: נוצרה טיוטת עמוד Elementor ${actual.id}. התוכן אומת בקריאה חוזרת מהאתר.`
-        : kind === "elementor-trash"
-          ? `WordPress: טיוטה ${actual.id} הועברה לפח האשפה (Trash).`
-          : `WordPress: עודכן עמוד Elementor ${actual.id}. התוכן אומת בקריאה חוזרת מהאתר.`;
+      : kind === "elementor-duplicate"
+        ? `WordPress: נוצר עותק טיוטה ${actual.id} של העמוד ${t.sourceId}. הקריאה החוזרת השוותה את העותק למקור (תוכן, הגדרות עמוד ותבנית) ואומתה.`
+        : kind === "elementor-edit"
+          ? `WordPress: עודכן עמוד Elementor ${actual.id}. הקריאה החוזרת אימתה שהעמוד שווה למקור עם הפעולות שאושרו בלבד.`
+          : kind === "elementor-create"
+            ? `WordPress: נוצרה טיוטת עמוד Elementor ${actual.id}. התוכן אומת בקריאה חוזרת מהאתר.`
+            : kind === "elementor-trash"
+              ? `WordPress: טיוטה ${actual.id} הועברה לפח האשפה (Trash).`
+              : `WordPress: עודכן עמוד Elementor ${actual.id}. התוכן אומת בקריאה חוזרת מהאתר.`;
     return {
       text,
       page: {
@@ -2836,7 +2947,7 @@ class ElementorBuilder {
     };
   }
 }
-Object.assign(ElementorBuilder.prototype, tpl.methods);
+Object.assign(ElementorBuilder.prototype, tpl.methods, edit.methods);
 Object.assign(H, {
   fail,
   object,
@@ -2857,10 +2968,23 @@ Object.assign(H, {
   placeholders,
   CSS_WARN,
   MAX_BEFORE,
+  checkWidget,
+  containerElement,
+  widgetElement,
+  MOCK_HOST,
+  validateElementor,
+  DEFAULT_PALETTE,
+  ICONS,
+  hebrew,
+  digest,
+  stateOfPage,
 });
 module.exports = {
   ElementorBuilder,
   TEMPLATE_TOOL: tpl.TEMPLATE_TOOL,
+  EDIT_TOOL: edit.EDIT_TOOL,
+  DUP_TOOL: edit.DUP_TOOL,
+  operationsSchema,
   templateProps: tpl.templateProps,
   validateTemplate: tpl.validateTemplate,
   elementorTools,

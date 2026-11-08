@@ -15,6 +15,7 @@ function fixture(t) {
     status: () => ({ connected: true, site: "https://public.example" }),
     page: async () => ({ id: 5 }),
     pages: async () => [],
+    compactPages: async () => ({ items: [], total: 0 }),
     pageRequest: async () => {
       throw Error("no writes");
     },

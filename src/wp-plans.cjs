@@ -10,6 +10,9 @@ const {
   containersSchema,
   ELEMENTOR_UNDOABLE,
   TEMPLATE_TOOL,
+  EDIT_TOOL,
+  DUP_TOOL,
+  operationsSchema,
   templateProps,
 } = require("./wp-elementor.cjs");
 const { patternsSchema } = require("./elementor-kit/index.cjs");
@@ -31,6 +34,8 @@ const ACTIONS = [
   GLOBALS,
   TERM,
   TEMPLATE_TOOL,
+  DUP_TOOL,
+  EDIT_TOOL,
   ...structureTools
     .filter((t) => t.name.startsWith("wp_prepare_"))
     .map((t) => t.name),
@@ -47,6 +52,8 @@ const LABELS = {
   [GLOBALS]: "צבעים וגופנים גלובליים (Elementor)",
   [TERM]: "יצירת קטגוריה/תגית",
   [TEMPLATE_TOOL]: "תבנית כותרת/תחתית (Elementor Pro)",
+  [DUP_TOOL]: "העתקת עמוד Elementor",
+  [EDIT_TOOL]: "שינויים ממוקדים בעמוד Elementor",
   wp_prepare_menu: "הגדרת התפריט הראשי",
   wp_prepare_front_page: "הגדרת דף הבית",
   wp_prepare_site_css: "עיצוב האתר (CSS)",
@@ -171,6 +178,9 @@ const planTool = {
                   ([k]) => !["id", "title"].includes(k),
                 ),
               ),
+              // Existing Elementor pages: the source of a copy, and targeted operations (id may be an earlier copy).
+              sourceId: { type: "integer" },
+              operations: operationsSchema(referenceId),
               globalColors: globalsSchema.globalColors,
               globalFonts: globalsSchema.globalFonts,
               graphicId: str,
@@ -432,6 +442,7 @@ function validatePlan(args, validate) {
                 "wp_prepare_create_page",
                 "wp_prepare_create_post",
                 ELEMENTOR,
+                DUP_TOOL,
                 ...(template ? ["wp_prepare_menu"] : []),
               ].includes(sourceTool)
             )
@@ -475,7 +486,7 @@ function validatePlan(args, validate) {
                 sourceTool !== expected &&
                 !(
                   expected === "wp_prepare_create_page" &&
-                  sourceTool === ELEMENTOR
+                  (sourceTool === ELEMENTOR || sourceTool === DUP_TOOL)
                 )
               )
                 error("סוג המשאב בהפניה אינו תואם לשלב");
@@ -494,6 +505,14 @@ function validatePlan(args, validate) {
         error(
           "בשלב Elementor של עדכון יש לציין מזהה מספרי של עמוד קיים (לא הפניה לשלב קודם)",
         );
+      // A targeted edit may point at a copy made earlier in the plan (its data is simulated until that step has run).
+      if (step.tool === EDIT_TOOL && typeof step.args.id === "string") {
+        const m = /^\{\{([a-z][a-z0-9_]{0,39})\.id\}\}$/.exec(step.args.id);
+        if (!m || earlier.get(m[1]) !== DUP_TOOL)
+          error(
+            "שלב שינויים ממוקדים יכול להפנות רק לעותק שנוצר בשלב קודם (wp_prepare_duplicate_page)",
+          );
+      }
       walk(step.args, "");
       validate(step.tool, replaceRefs(step.args, mock));
       if (
@@ -630,6 +649,7 @@ class BuildPlans {
     const fingerprint = agent.fingerprint(id),
       planId = randomUUID();
     const virtual = new Map(),
+      virtualElementor = new Map(),
       owners = new Map(),
       steps = [];
     let imageBytes = 0,
@@ -680,7 +700,9 @@ class BuildPlans {
         } else if (
           definition.tool === ELEMENTOR ||
           definition.tool === GLOBALS ||
-          definition.tool === TEMPLATE_TOOL
+          definition.tool === TEMPLATE_TOOL ||
+          definition.tool === DUP_TOOL ||
+          definition.tool === EDIT_TOOL
         ) {
           pending = await agent.elementor.prepare(
             agent,
@@ -688,8 +710,19 @@ class BuildPlans {
             definition.tool,
             resolved,
             signal,
-            { mockIds: new Set([...mock.values()].map((v) => v.id)) },
+            {
+              mockIds: new Set([...mock.values()].map((v) => v.id)),
+              pages: virtualElementor,
+            },
           );
+          // Later steps see this step's page: the copy, or the page after the edit.
+          if (definition.tool === DUP_TOOL)
+            virtualElementor.set(
+              mock.get(definition.key).id,
+              pending.target.virtual,
+            );
+          if (definition.tool === EDIT_TOOL && pending.target.virtualAfter)
+            virtualElementor.set(resolved.id, pending.target.virtualAfter);
         } else if (structureTools.some((t) => t.name === definition.tool)) {
           pending = await agent.structure.prepare(
             agent,
@@ -762,7 +795,9 @@ class BuildPlans {
           owners.set(`${resource}:${pageId}`, definition.key);
         }
         // A page created by an Elementor step does not exist yet either: later menu / front page steps see a projected draft.
-        if (pending.kind === "elementor-create") {
+        if (
+          ["elementor-create", "elementor-duplicate"].includes(pending.kind)
+        ) {
           const pageId = mock.get(definition.key).id;
           virtual.set(`pages:${pageId}`, {
             id: pageId,
@@ -1001,7 +1036,11 @@ class BuildPlans {
           p.preview.undoLogId = entry.id;
         } else if (ELEMENTOR_UNDOABLE.has(entry.action)) {
           try {
-            p = await agent.elementor.prepareUndo(agent, id, entry, signal);
+            p = await agent.elementor.prepareUndo(agent, id, entry, signal, {
+              planDigests: new Set(
+                rows.map((r) => r.written?.dataDigest).filter(Boolean),
+              ),
+            });
           } catch (e) {
             // Globals that were only created cannot be deleted remotely: that step is skipped and the review says so.
             if (!e.skippable) throw e;
@@ -1010,6 +1049,19 @@ class BuildPlans {
           }
           p.undoLogId = entry.id;
           p.preview.undoLogId = entry.id;
+          // A page that a later step of this plan also changed is undone by that step first: this step then rebases on it.
+          const pageOf = (e) => e.written?.id ?? e.pageId;
+          if (
+            rows
+              .slice(0, index)
+              .some(
+                (r) =>
+                  ELEMENTOR_UNDOABLE.has(r.action) &&
+                  pageOf(r) &&
+                  pageOf(r) === pageOf(entry),
+              )
+          )
+            p.rebase = true;
         } else if (
           [
             "menu",
